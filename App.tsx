@@ -1,45 +1,69 @@
-/**
- * Sample React Native App
- * https://github.com/facebook/react-native
- *
- * @format
- */
+import React from 'react'
+import { View, Text, StyleSheet, StatusBar } from 'react-native'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { GestureHandlerRootView } from 'react-native-gesture-handler'
+import { SafeAreaProvider } from 'react-native-safe-area-context'
+import { RootNavigator } from './src/navigation/RootNavigator'
+import { useAppStore } from './src/store/useAppStore'
+import { Colors, FontSize, Radius, Spacing } from './src/constants/colors'
 
-import { NewAppScreen } from '@react-native/new-app-screen';
-import { StatusBar, StyleSheet, useColorScheme, View } from 'react-native';
-import {
-  SafeAreaProvider,
-  useSafeAreaInsets,
-} from 'react-native-safe-area-context';
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry:             2,
+      retryDelay:        1000,
+      staleTime:         30_000,
+      gcTime:            5 * 60_000,
+    },
+    mutations: {
+      retry: 1,
+    },
+  },
+})
 
-function App() {
-  const isDarkMode = useColorScheme() === 'dark';
+// ── Toast notification ────────────────────────────────────────────────────────
+function Toast() {
+  const toast = useAppStore(s => s.toast)
+  if (!toast) return null
 
   return (
-    <SafeAreaProvider>
-      <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
-      <AppContent />
-    </SafeAreaProvider>
-  );
+    <View style={[
+      styles.toast,
+      { backgroundColor: toast.type === 'success' ? Colors.success : Colors.danger }
+    ]}>
+      <Text style={styles.toastText}>{toast.message}</Text>
+    </View>
+  )
 }
 
-function AppContent() {
-  const safeAreaInsets = useSafeAreaInsets();
-
+export default function App() {
   return (
-    <View style={styles.container}>
-      <NewAppScreen
-        templateFileName="App.tsx"
-        safeAreaInsets={safeAreaInsets}
-      />
-    </View>
-  );
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <QueryClientProvider client={queryClient}>
+          <StatusBar barStyle="dark-content" />
+          <RootNavigator />
+          <Toast />
+        </QueryClientProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
+  )
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
+  toast: {
+    position:        'absolute',
+    bottom:          90,
+    left:            Spacing.lg,
+    right:           Spacing.lg,
+    borderRadius:    Radius.md,
+    padding:         Spacing.md,
+    alignItems:      'center',
+    zIndex:          9999,
   },
-});
-
-export default App;
+  toastText: {
+    color:      Colors.white,
+    fontSize:   FontSize.sm,
+    fontWeight: '600',
+  },
+})
