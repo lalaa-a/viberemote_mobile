@@ -68,6 +68,14 @@ export interface PendingRequest {
   machines?:      Pick<Machine, 'id' | 'label' | 'is_online'>
 }
 
+// QR code payload scanned from the desktop app
+export interface QRPayload {
+  machineId:   string
+  apiKey:      string
+  supabaseUrl: string
+  apiUrl:      string
+}
+
 // Navigation param types
 export type RootStackParamList = {
   SignIn:        undefined

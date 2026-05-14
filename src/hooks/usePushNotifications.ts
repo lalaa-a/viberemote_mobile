@@ -1,12 +1,12 @@
 import { useEffect } from 'react'
-import { Platform, Alert } from 'react-native'
+import { Platform } from 'react-native'
 import messaging from '@react-native-firebase/messaging'
 import notifee, {
   AndroidImportance,
   AndroidVisibility,
   EventType,
 } from '@notifee/react-native'
-import { supabase } from '../api/supabase'
+import { registerPushToken } from '../api/server'
 import { useNavigation } from '@react-navigation/native'
 
 // ── Request permission (Android 13+ requires explicit permission) ─────────────
@@ -29,17 +29,13 @@ async function requestPermission(): Promise<boolean> {
   )
 }
 
-// ── Save FCM token to Supabase so the edge function can send pushes ───────────
+// ── Save FCM token via server so the backend can send pushes ──────────────────
 async function savePushToken(token: string) {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return
-
-  await supabase
-    .from('push_tokens')
-    .upsert(
-      { user_id: user.id, token, platform: Platform.OS },
-      { onConflict: 'user_id' }
-    )
+  try {
+    await registerPushToken(token, Platform.OS)
+  } catch {
+    // Non-fatal — token will be re-registered on next app launch
+  }
 }
 
 // ── Create the notification channel (Android only) ───────────────────────────

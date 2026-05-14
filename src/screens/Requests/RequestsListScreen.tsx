@@ -39,7 +39,7 @@ export function RequestsListScreen() {
             </View>
           )}
         </View>
-        <Text style={styles.liveIndicator}>● Live</Text>
+        <Text style={styles.liveIndicator}>↻ 8s</Text>
       </View>
 
       <FlatList

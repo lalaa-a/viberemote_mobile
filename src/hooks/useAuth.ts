@@ -1,33 +1,14 @@
-import { useState, useEffect } from 'react'
-import { Session } from '@supabase/supabase-js'
-import { supabase } from '../api/supabase'
+import { useAppStore } from '../store/useAppStore'
+import { clearCredentials } from '../api/server'
 
 export function useAuth() {
-  const [session, setSession] = useState<Session | null>(null)
-  const [loading, setLoading] = useState(true)
+  const credentials    = useAppStore(s => s.credentials)
+  const setCredentials = useAppStore(s => s.setCredentials)
 
-  useEffect(() => {
-    // Read from MMKV synchronously — no loading flash
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session)
-      setLoading(false)
-    })
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event, session) => setSession(session)
-    )
-
-    return () => subscription.unsubscribe()
-  }, [])
-
-  async function signIn(email: string, password: string) {
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) throw error
+  function signOut() {
+    clearCredentials()
+    setCredentials(null)
   }
 
-  async function signOut() {
-    await supabase.auth.signOut()
-  }
-
-  return { session, loading, signIn, signOut }
+  return { credentials, loading: false, signOut }
 }

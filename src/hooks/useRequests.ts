@@ -1,72 +1,29 @@
-import { useEffect } from 'react'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
-import { supabase } from '../api/supabase'
 import {
   fetchPendingRequests,
   fetchRequestById,
   fetchHistory,
   decideRequest,
-} from '../api/requests'
+} from '../api/server'
 import type { PendingRequest } from '../types'
 
-// ── Pending requests list with realtime ───────────────────────────────────────
+// ── Pending requests list — polls every 8 seconds ─────────────────────────────
 export function usePendingRequests() {
-  const queryClient = useQueryClient()
-
-  const query = useQuery({
-    queryKey:  ['requests', 'pending'],
-    queryFn:   fetchPendingRequests,
-    staleTime: 30_000,
+  return useQuery({
+    queryKey:       ['requests', 'pending'],
+    queryFn:        fetchPendingRequests,
+    staleTime:      0,
+    refetchInterval: 8_000,
   })
-
-  useEffect(() => {
-    const channel = supabase
-      .channel(`requests-realtime-${Date.now()}`)
-
-      // New request inserted — prepend to list
-      .on('postgres_changes', {
-        event:  'INSERT',
-        schema: 'public',
-        table:  'pending_requests',
-        filter: 'status=eq.pending',
-      }, ({ new: row }) => {
-        queryClient.setQueryData<PendingRequest[]>(
-          ['requests', 'pending'],
-          (prev = []) => [row as PendingRequest, ...prev]
-        )
-      })
-
-      // Request updated — remove from pending if no longer pending
-      .on('postgres_changes', {
-        event:  'UPDATE',
-        schema: 'public',
-        table:  'pending_requests',
-      }, ({ new: row }) => {
-        const updated = row as PendingRequest
-        if (updated.status !== 'pending') {
-          queryClient.setQueryData<PendingRequest[]>(
-            ['requests', 'pending'],
-            (prev = []) => prev.filter(r => r.id !== updated.id)
-          )
-        }
-        // Refresh the individual request cache
-        queryClient.setQueryData(['requests', updated.id], updated)
-      })
-
-      .subscribe()
-
-    return () => { supabase.removeChannel(channel) }
-  }, [queryClient])
-
-  return query
 }
 
 // ── Single request detail ─────────────────────────────────────────────────────
 export function useRequest(id: string) {
   return useQuery({
-    queryKey: ['requests', id],
-    queryFn:  () => fetchRequestById(id),
-    staleTime: 10_000,
+    queryKey:        ['requests', id],
+    queryFn:         () => fetchRequestById(id),
+    staleTime:       10_000,
+    refetchInterval: 8_000,
   })
 }
 

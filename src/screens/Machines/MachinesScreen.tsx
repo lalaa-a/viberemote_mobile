@@ -1,11 +1,12 @@
 import React from 'react'
 import {
   View, Text, FlatList, StyleSheet,
-  RefreshControl, StatusBar,
+  RefreshControl, StatusBar, TouchableOpacity, Alert,
 } from 'react-native'
 import { useQuery } from '@tanstack/react-query'
 import { formatDistanceToNow } from 'date-fns'
 import { fetchMachines } from '../../api/machines'
+import { useAuth } from '../../hooks/useAuth'
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../../constants/colors'
 import type { Machine } from '../../types'
 
@@ -51,24 +52,41 @@ function MachineCard({ machine }: { machine: Machine }) {
 }
 
 export function MachinesScreen() {
+  const { signOut } = useAuth()
   const { data: machines = [], isRefetching, refetch } = useQuery({
     queryKey:        ['machines'],
     queryFn:         fetchMachines,
-    refetchInterval: 30_000,    // re-fetch every 30s to match heartbeat
+    refetchInterval: 30_000,
   })
 
   const online  = machines.filter(m => m.is_online).length
   const offline = machines.length - online
+
+  function handleDisconnect() {
+    Alert.alert(
+      'Disconnect',
+      'Remove this machine pairing? You will need to scan the QR code again.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Disconnect', style: 'destructive', onPress: signOut },
+      ]
+    )
+  }
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor={Colors.bgPrimary} />
 
       <View style={styles.header}>
-        <Text style={styles.title}>Machines</Text>
-        <Text style={styles.subtitle}>
-          {online} online · {offline} offline
-        </Text>
+        <View>
+          <Text style={styles.title}>Machines</Text>
+          <Text style={styles.subtitle}>
+            {online} online · {offline} offline
+          </Text>
+        </View>
+        <TouchableOpacity onPress={handleDisconnect} style={styles.disconnectBtn}>
+          <Text style={styles.disconnectText}>Disconnect</Text>
+        </TouchableOpacity>
       </View>
 
       <FlatList
@@ -105,10 +123,25 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.bgSecondary,
   },
   header: {
+    flexDirection:   'row',
+    alignItems:      'center',
+    justifyContent:  'space-between',
     padding:         Spacing.lg,
     backgroundColor: Colors.bgPrimary,
     borderBottomWidth: 0.5,
     borderColor:     Colors.border,
+  },
+  disconnectBtn: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical:   Spacing.xs,
+    borderRadius:      Radius.sm,
+    borderWidth:       1,
+    borderColor:       Colors.risk.medium.text,
+  },
+  disconnectText: {
+    fontSize:  FontSize.xs,
+    color:     Colors.risk.medium.text,
+    fontWeight: '500',
   },
   title: {
     fontSize:   FontSize.xl,

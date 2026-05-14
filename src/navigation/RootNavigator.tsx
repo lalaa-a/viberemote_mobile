@@ -2,9 +2,9 @@ import React from 'react'
 import { NavigationContainer } from '@react-navigation/native'
 import { createNativeStackNavigator } from '@react-navigation/native-stack'
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs'
-import { Text, View } from 'react-native'
+import { Text } from 'react-native'
 import { useAuth } from '../hooks/useAuth'
-import { SignInScreen } from '../screens/Auth/SignInScreen'
+import { QRScanScreen } from '../screens/Auth/QRScanScreen'
 import { RequestsListScreen } from '../screens/Requests/RequestsListScreen'
 import { RequestDetailScreen } from '../screens/Requests/RequestDetailScreen'
 import { MachinesScreen } from '../screens/Machines/MachinesScreen'
@@ -46,7 +46,7 @@ function RequestsNavigator() {
   )
 }
 
-// ── Tab bar icon (text-based, no icon library needed to start) ────────────────
+// ── Tab bar icon (text-based, no icon library needed) ────────────────────────
 function TabIcon({ label, focused }: { label: string; focused: boolean }) {
   const icons: Record<string, string> = {
     Requests: '⊡',
@@ -67,15 +67,15 @@ function AppNavigator() {
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
-        headerShown:     false,
+        headerShown:             false,
         tabBarActiveTintColor:   Colors.tabActive,
         tabBarInactiveTintColor: Colors.tabInactive,
         tabBarStyle: {
-          backgroundColor:  Colors.tabBg,
-          borderTopColor:   Colors.border,
-          borderTopWidth:   0.5,
-          paddingBottom:    4,
-          height:           56,
+          backgroundColor: Colors.tabBg,
+          borderTopColor:  Colors.border,
+          borderTopWidth:  0.5,
+          paddingBottom:   4,
+          height:          56,
         },
         tabBarLabelStyle: { fontSize: 11, fontWeight: '500' },
         tabBarIcon: ({ focused }) => (
@@ -113,16 +113,16 @@ function AppNavigator() {
 
 // ── Root navigator — auth guard ───────────────────────────────────────────────
 export function RootNavigator() {
-  const { session, loading } = useAuth()
+  const { credentials, loading } = useAuth()
 
   if (loading) return null
 
   return (
     <NavigationContainer>
       <RootStack.Navigator screenOptions={{ headerShown: false }}>
-        {session
+        {credentials
           ? <RootStack.Screen name="App"    component={AppNavigator} />
-          : <RootStack.Screen name="SignIn" component={SignInScreen} />
+          : <RootStack.Screen name="SignIn" component={QRScanScreen} />
         }
       </RootStack.Navigator>
     </NavigationContainer>
