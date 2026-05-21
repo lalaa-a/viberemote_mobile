@@ -76,19 +76,62 @@ export interface QRPayload {
   apiUrl:      string
 }
 
-// Navigation param types
+// ── Sessions / agents ─────────────────────────────────────────────────────────
+
+export type SessionStatus = 'active' | 'idle' | 'finished'
+
+export interface AgentSession {
+  id:               string
+  machine_id:       string
+  machine_label:    string
+  session_id:       string
+  cwd:              string | null
+  status:           SessionStatus
+  pending_count:    number
+  last_activity_at: string
+  started_at:       string
+}
+
+export interface MobileCommand {
+  id:           string
+  session_id:   string | null
+  prompt:       string
+  status:       'pending' | 'delivered' | 'cancelled'
+  created_at:   string
+  delivered_at: string | null
+}
+
+export interface FsNode {
+  name:      string
+  path:      string
+  type:      'file' | 'dir'
+  size?:     number
+  children?: FsNode[] | null
+}
+
+// ── Navigation param types ─────────────────────────────────────────────────────
+
 export type RootStackParamList = {
-  SignIn:        undefined
-  App:           undefined
+  SignIn: undefined
+  App:    undefined
 }
 
 export type TabParamList = {
-  RequestsTab:   undefined
-  MachinesTab:   undefined
-  HistoryTab:    undefined
+  RequestsTab:  undefined
+  SessionsTab:  undefined
+  MachinesTab:  undefined
+  HistoryTab:   undefined
 }
 
 export type RequestsStackParamList = {
   RequestsList:  undefined
   RequestDetail: { id: string }
+}
+
+export type SessionsStackParamList = {
+  SessionsList:  undefined
+  SessionDetail: { sessionId: string; machineLabel: string; cwd: string | null }
+  RequestDetail: { id: string }
+  FileBrowser:   { sessionId: string; machineLabel: string; cwd: string | null }
+  PromptCompose: { sessionId: string; prefill?: string }
 }

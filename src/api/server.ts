@@ -1,5 +1,5 @@
 import { createMMKV } from 'react-native-mmkv'
-import type { Machine, PendingRequest } from '../types'
+import type { Machine, PendingRequest, AgentSession, MobileCommand, FsNode } from '../types'
 
 const storage = createMMKV({ id: 'machine-credentials' })
 
@@ -100,4 +100,51 @@ export function registerPushToken(token: string, platform: string): Promise<void
     method: 'POST',
     body:   JSON.stringify({ token, platform }),
   })
+}
+
+// ── Sessions ───────────────────────────────────────────────────────────────────
+
+export function fetchSessions(): Promise<AgentSession[]> {
+  return request<AgentSession[]>('/mobile/sessions')
+}
+
+export function fetchSessionRequests(sessionId: string): Promise<PendingRequest[]> {
+  return request<PendingRequest[]>(`/mobile/sessions/${encodeURIComponent(sessionId)}/requests`)
+}
+
+// ── Prompt injection ───────────────────────────────────────────────────────────
+
+export function sendPrompt(prompt: string, sessionId?: string): Promise<{ id: string }> {
+  return request<{ id: string }>('/mobile/prompt', {
+    method: 'POST',
+    body:   JSON.stringify({ prompt, sessionId }),
+  })
+}
+
+export function fetchPrompts(): Promise<MobileCommand[]> {
+  return request<MobileCommand[]>('/mobile/prompts')
+}
+
+export function cancelPrompt(id: string): Promise<void> {
+  return request<void>(`/mobile/prompt/${id}`, { method: 'DELETE' })
+}
+
+// ── File tree ──────────────────────────────────────────────────────────────────
+
+export function requestFileTree(
+  path: string,
+  sessionId?: string
+): Promise<{ requestId: string }> {
+  return request<{ requestId: string }>('/mobile/fs/request', {
+    method: 'POST',
+    body:   JSON.stringify({ path, sessionId }),
+  })
+}
+
+export function pollFileTreeResult(requestId: string): Promise<{
+  status: 'pending' | 'ready' | 'error'
+  result?: FsNode[]
+  error?:  string
+}> {
+  return request(`/mobile/fs/result/${requestId}`)
 }
