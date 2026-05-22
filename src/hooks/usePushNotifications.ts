@@ -1,13 +1,20 @@
 import { useEffect } from 'react'
 import { Platform } from 'react-native'
-import messaging from '@react-native-firebase/messaging'
+import {
+  getMessaging,
+  getToken,
+  onMessage,
+  onTokenRefresh,
+  setBackgroundMessageHandler,
+  getInitialNotification,
+} from '@react-native-firebase/messaging'
 import notifee, {
   AndroidImportance,
   AndroidVisibility,
   EventType,
 } from '@notifee/react-native'
 import { registerPushToken } from '../api/server'
-import { useNavigation } from '@react-navigation/native'
+import { navigationRef } from '../navigation/RootNavigator'
 
 // ── Request permission (Android 13+ requires explicit permission) ─────────────
 async function requestPermission(): Promise<boolean> {
@@ -22,10 +29,13 @@ async function requestPermission(): Promise<boolean> {
     return true
   }
 
-  const authStatus = await messaging().requestPermission()
+  const { requestPermission: reqPerm, AuthorizationStatus } = await import(
+    '@react-native-firebase/messaging'
+  )
+  const authStatus = await reqPerm(getMessaging())
   return (
-    authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
-    authStatus === messaging.AuthorizationStatus.PROVISIONAL
+    authStatus === AuthorizationStatus.AUTHORIZED ||
+    authStatus === AuthorizationStatus.PROVISIONAL
   )
 }
 
@@ -33,8 +43,9 @@ async function requestPermission(): Promise<boolean> {
 async function savePushToken(token: string) {
   try {
     await registerPushToken(token, Platform.OS)
-  } catch {
-    // Non-fatal — token will be re-registered on next app launch
+    console.log('[FCM] Push token registered with server')
+  } catch (e: any) {
+    console.warn('[FCM] Failed to register push token:', e?.message ?? e)
   }
 }
 
@@ -51,104 +62,110 @@ async function ensureChannel() {
 }
 
 // ── Display an incoming FCM message as a local notification ──────────────────
+// Server sends data-only messages — title/body live in remoteMessage.data.
 async function displayNotification(remoteMessage: any) {
+  const title = remoteMessage.data?.title
+             ?? remoteMessage.notification?.title
+             ?? 'Approval needed'
+  const body  = remoteMessage.data?.body
+             ?? remoteMessage.notification?.body
+             ?? 'A tool-use request is waiting'
+
   await notifee.displayNotification({
-    title: remoteMessage.notification?.title ?? 'Approval needed',
-    body:  remoteMessage.notification?.body  ?? 'A tool-use request is waiting',
-    data:  remoteMessage.data,
+    title,
+    body,
+    data: remoteMessage.data,
     android: {
-      channelId:  'agent-requests',
-      importance: AndroidImportance.HIGH,
+      channelId:   'agent-requests',
+      importance:  AndroidImportance.HIGH,
       pressAction: { id: 'default' },
-      // Show request ID in the notification for context
-      tag: remoteMessage.data?.requestId,
+      tag:         remoteMessage.data?.requestId,
     },
   })
 }
 
-// ── Hook — call this once in App.tsx or a top-level screen ───────────────────
-export function usePushNotifications() {
-  const navigation = useNavigation<any>()
+// ── Navigate to a request detail screen from anywhere in the app ──────────────
+// Uses a navigation ref so this works regardless of the calling component's
+// position in the navigator tree (avoids "not handled by any navigator" error).
+function navigateToRequest(requestId: string) {
+  if (!navigationRef.isReady()) return
+  // Navigate through: RootStack(App) → Tab(RequestsTab) → RequestsStack(RequestDetail)
+  navigationRef.navigate('App', {
+    screen: 'RequestsTab',
+    params: {
+      screen: 'RequestDetail',
+      params: { id: requestId },
+    },
+  })
+}
 
+// ── Hook — call once in AppNavigator (inside NavigationContainer) ─────────────
+export function usePushNotifications() {
   useEffect(() => {
-    let unsubscribeForeground: (() => void) | undefined
-    let unsubscribeNotifee:    (() => void) | undefined
+    let unsubForeground: (() => void) | undefined
+    let unsubNotifee:    (() => void) | undefined
 
     async function setup() {
       try {
+        const m = getMessaging()
+
         const granted = await requestPermission()
         if (!granted) return
 
         await ensureChannel()
 
-        // Get and save the FCM token
-        const token = await messaging().getToken()
+        const token = await getToken(m)
         await savePushToken(token)
 
-        // Refresh token if it rotates
-        const unsubToken = messaging().onTokenRefresh(savePushToken)
+        unsubForeground = onMessage(m, displayNotification)
+        const unsubRefresh = onTokenRefresh(m, savePushToken)
 
-        // Foreground messages — app is open, show a local notification
-        unsubscribeForeground = messaging().onMessage(displayNotification)
-
-        // Notifee foreground events — user tapped the notification
-        unsubscribeNotifee = notifee.onForegroundEvent(({ type, detail }) => {
+        unsubNotifee = notifee.onForegroundEvent(({ type, detail }) => {
           if (type === EventType.PRESS) {
-            const requestId = detail.notification?.data?.requestId
-            if (requestId) {
-              navigation.navigate('RequestsTab', {
-                screen: 'RequestDetail',
-                params: { id: requestId },
-              })
-            }
+            const requestId = detail.notification?.data?.requestId as string | undefined
+            if (requestId) navigateToRequest(requestId)
           }
         })
 
-        return unsubToken
+        return unsubRefresh
       } catch (e) {
-        console.warn('[FCM] Push notification setup skipped — Firebase not initialised:', e)
+        console.warn('[FCM] Push notification setup failed:', e)
       }
     }
 
     const cleanup = setup()
 
-    // Background / quit — notification tap deep-links into the app
+    // Killed-app tap: check notifee (our displayed notifications) first,
+    // then Firebase (notifications that bypassed the background handler).
+    notifee.getInitialNotification().then(n => {
+      const id = n?.notification?.data?.requestId as string | undefined
+      if (id) setTimeout(() => navigateToRequest(id), 500)
+    }).catch(() => {})
+
     try {
-      messaging()
-        .getInitialNotification()
-        .then(remoteMessage => {
-          if (remoteMessage?.data?.requestId) {
-            // Slight delay to let navigation mount
-            setTimeout(() => {
-              navigation.navigate('RequestsTab', {
-                screen: 'RequestDetail',
-                params: { id: remoteMessage.data!.requestId },
-              })
-            }, 500)
-          }
-        })
-    } catch (_) {
-      // Firebase not yet configured
-    }
+      getInitialNotification(getMessaging()).then(msg => {
+        if (msg?.data?.requestId) {
+          setTimeout(() => navigateToRequest(msg.data!.requestId as string), 500)
+        }
+      })
+    } catch (_) {}
 
     return () => {
       cleanup.then(unsub => unsub?.())
-      unsubscribeForeground?.()
-      unsubscribeNotifee?.()
+      unsubForeground?.()
+      unsubNotifee?.()
     }
-  }, [navigation])
+  }, [])
 }
 
-// ── Background message handler — must be registered outside React ─────────────
-// Call this in index.js BEFORE AppRegistry.registerComponent
+// ── Background message handler — register in index.js before AppRegistry ──────
 export function registerBackgroundHandler() {
   try {
-    messaging().setBackgroundMessageHandler(async remoteMessage => {
+    setBackgroundMessageHandler(getMessaging(), async remoteMessage => {
       await ensureChannel()
       await displayNotification(remoteMessage)
     })
   } catch (e) {
-    // Firebase not yet configured (google-services.json missing / native plugin disabled)
-    console.warn('[FCM] registerBackgroundHandler skipped — Firebase not initialised:', e)
+    console.warn('[FCM] registerBackgroundHandler failed:', e)
   }
 }

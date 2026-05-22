@@ -1,5 +1,5 @@
 import React from 'react'
-import { NavigationContainer } from '@react-navigation/native'
+import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native'
 import { createNativeStackNavigator } from '@react-navigation/native-stack'
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs'
 import { Text } from 'react-native'
@@ -15,6 +15,7 @@ import { MachinesScreen } from '../screens/Machines/MachinesScreen'
 import { HistoryScreen } from '../screens/History/HistoryScreen'
 import { usePendingRequests } from '../hooks/useRequests'
 import { useSessions } from '../hooks/useSessions'
+import { usePushNotifications } from '../hooks/usePushNotifications'
 import { Colors } from '../constants/colors'
 import type {
   RootStackParamList,
@@ -22,6 +23,8 @@ import type {
   RequestsStackParamList,
   SessionsStackParamList,
 } from '../types'
+
+export const navigationRef = createNavigationContainerRef<RootStackParamList>()
 
 const RootStack     = createNativeStackNavigator<RootStackParamList>()
 const Tab           = createBottomTabNavigator<TabParamList>()
@@ -111,6 +114,7 @@ function TabIcon({ label, focused }: { label: string; focused: boolean }) {
 function AppNavigator() {
   const { data: pending  = [] } = usePendingRequests()
   const { data: sessions = [] } = useSessions()
+  usePushNotifications()
 
   const activeSessions = sessions.filter(s => s.status === 'active').length
 
@@ -182,7 +186,7 @@ export function RootNavigator() {
   if (loading) return null
 
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef}>
       <RootStack.Navigator screenOptions={{ headerShown: false }}>
         {credentials
           ? <RootStack.Screen name="App"    component={AppNavigator} />

@@ -110,15 +110,17 @@ export interface FsNode {
 }
 
 // ── Navigation param types ─────────────────────────────────────────────────────
+import type { NavigatorScreenParams } from '@react-navigation/native'
+export type { NavigatorScreenParams }
 
 export type RootStackParamList = {
   SignIn: undefined
-  App:    undefined
+  App:    NavigatorScreenParams<TabParamList> | undefined
 }
 
 export type TabParamList = {
-  RequestsTab:  undefined
-  SessionsTab:  undefined
+  RequestsTab:  NavigatorScreenParams<RequestsStackParamList> | undefined
+  SessionsTab:  NavigatorScreenParams<SessionsStackParamList> | undefined
   MachinesTab:  undefined
   HistoryTab:   undefined
 }

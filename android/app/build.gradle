@@ -1,7 +1,7 @@
 apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
-// apply plugin: "com.google.gms.google-services"  // TODO: re-enable after adding google-services.json
+apply plugin: "com.google.gms.google-services"  // TODO: re-enable after adding google-services.json
 
 // react-native-config — reads your .env file
 apply from: project(':react-native-config').projectDir.getPath() + "/dotenv.gradle"
@@ -76,9 +76,9 @@ dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
     implementation("com.facebook.react:hermes-android")
-
-    // Firebase (for FCM push notifications) — TODO: re-enable after adding google-services.json
-    // implementation platform('com.google.firebase:firebase-bom:32.7.0')
-    // implementation 'com.google.firebase:firebase-messaging'
+     // Firebase BoM — pins all Firebase library versions
+    implementation platform('com.google.firebase:firebase-bom:34.13.0')
+    implementation 'com.google.firebase:firebase-analytics'
+    implementation 'com.google.firebase:firebase-messaging'
 }
 
