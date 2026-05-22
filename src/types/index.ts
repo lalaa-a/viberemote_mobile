@@ -81,15 +81,16 @@ export interface QRPayload {
 export type SessionStatus = 'active' | 'idle' | 'finished'
 
 export interface AgentSession {
-  id:               string
-  machine_id:       string
-  machine_label:    string
-  session_id:       string
-  cwd:              string | null
-  status:           SessionStatus
-  pending_count:    number
-  last_activity_at: string
-  started_at:       string
+  id:                string
+  machine_id:        string
+  machine_label:     string
+  machine_is_online: boolean
+  session_id:        string
+  cwd:               string | null
+  status:            SessionStatus
+  pending_count:     number
+  last_activity_at:  string
+  started_at:        string
 }
 
 export interface MobileCommand {
@@ -132,7 +133,7 @@ export type RequestsStackParamList = {
 
 export type SessionsStackParamList = {
   SessionsList:  undefined
-  SessionDetail: { sessionId: string; machineLabel: string; cwd: string | null }
+  SessionDetail: { sessionId: string; machineLabel: string; cwd: string | null; machineIsOnline: boolean }
   RequestDetail: { id: string }
   FileBrowser:   { sessionId: string; machineLabel: string; cwd: string | null }
   PromptCompose: { sessionId: string; prefill?: string }

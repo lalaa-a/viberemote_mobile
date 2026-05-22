@@ -102,9 +102,10 @@ export function SessionsScreen() {
       <SessionCard
         session={item}
         onDetail={() => navigation.navigate('SessionDetail', {
-          sessionId:    item.session_id,
-          machineLabel: item.machine_label,
-          cwd:          item.cwd,
+          sessionId:       item.session_id,
+          machineLabel:    item.machine_label,
+          cwd:             item.cwd,
+          machineIsOnline: item.machine_is_online,
         })}
         onPrompt={() => navigation.navigate('PromptCompose', {
           sessionId: item.session_id,

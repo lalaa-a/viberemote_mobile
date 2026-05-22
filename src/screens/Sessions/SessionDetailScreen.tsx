@@ -5,7 +5,8 @@ import {
   SectionList,
 } from 'react-native'
 import { useRoute, useNavigation } from '@react-navigation/native'
-import type { NativeStackNavigationProp, RouteProp } from '@react-navigation/native-stack'
+import type { RouteProp } from '@react-navigation/native'
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
 import { formatDistanceToNow } from 'date-fns'
 import { useSessionRequests, usePrompts, useCancelPrompt } from '../../hooks/useSessions'
 import { RequestCard } from '../../components/RequestCard'
@@ -18,7 +19,7 @@ type Nav   = NativeStackNavigationProp<SessionsStackParamList>
 export function SessionDetailScreen() {
   const route      = useRoute<Route>()
   const navigation = useNavigation<Nav>()
-  const { sessionId, machineLabel, cwd } = route.params
+  const { sessionId, machineLabel, cwd, machineIsOnline } = route.params
 
   const { data: requests = [], isLoading: reqLoading } = useSessionRequests(sessionId)
   const { data: allPrompts = [] }                      = usePrompts()
@@ -47,11 +48,14 @@ export function SessionDetailScreen() {
         </View>
         <View style={styles.headerActions}>
           <TouchableOpacity
-            style={styles.actionBtn}
+            style={[styles.actionBtn, !machineIsOnline && styles.actionBtnDisabled]}
             onPress={() => navigation.navigate('FileBrowser', { sessionId, machineLabel, cwd })}
             activeOpacity={0.7}
+            disabled={!machineIsOnline}
           >
-            <Text style={styles.actionBtnText}>Files</Text>
+            <Text style={[styles.actionBtnText, !machineIsOnline && styles.actionBtnTextDisabled]}>
+              {machineIsOnline ? 'Files' : 'Offline'}
+            </Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.actionBtn, styles.actionBtnPrimary]}
@@ -204,10 +208,17 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primary,
     borderColor:     Colors.primary,
   },
+  actionBtnDisabled: {
+    borderColor: Colors.borderLight,
+    opacity:     0.5,
+  },
   actionBtnText: {
     fontSize:   FontSize.sm,
     fontWeight: '500',
     color:      Colors.textSecondary,
+  },
+  actionBtnTextDisabled: {
+    color: Colors.textTertiary,
   },
   actionBtnPrimaryText: {
     fontSize:   FontSize.sm,
