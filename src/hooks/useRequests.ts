@@ -29,9 +29,9 @@ export function useRequest(id: string) {
 
 // ── History ───────────────────────────────────────────────────────────────────
 export function useHistory() {
-  return useQuery({
-    queryKey: ['requests', 'history'],
-    queryFn:  fetchHistory,
+  return useQuery<PendingRequest[]>({
+    queryKey:  ['requests', 'history'],
+    queryFn:   () => fetchHistory(),
     staleTime: 60_000,
   })
 }

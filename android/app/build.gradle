@@ -6,6 +6,9 @@ apply plugin: "com.google.gms.google-services"  // TODO: re-enable after adding 
 // react-native-config — reads your .env file
 apply from: project(':react-native-config').projectDir.getPath() + "/dotenv.gradle"
 
+// react-native-vector-icons — copies icon fonts into assets
+apply from: "../../node_modules/react-native-vector-icons/fonts.gradle"
+
 def enableProguardInReleaseBuilds =
         (project.findProperty("enableProguardInReleaseBuilds") ?: "false")
                 .toString()

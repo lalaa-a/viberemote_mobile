@@ -1,43 +1,130 @@
-import React, { useState } from 'react'
+import React, { useState, useMemo } from 'react'
 import {
-  View, Text, ScrollView, TouchableOpacity, StyleSheet, Platform
+  View, Text, ScrollView, TouchableOpacity, StyleSheet,
 } from 'react-native'
-import { Colors, Spacing, Radius, FontSize } from '../../constants/colors'
+import Ionicons from 'react-native-vector-icons/Ionicons'
+import { Colors, Spacing, Radius, FontSize, FontFamily } from '../../constants/colors'
 import type { FileDiff, DiffHunk } from '../../types'
 
 interface Props {
   diff: FileDiff
 }
 
-// ── Single hunk line ──────────────────────────────────────────────────────────
-function HunkLine({ hunk }: { hunk: DiffHunk }) {
-  const cfg =
-    hunk.type === 'add'    ? Colors.diffAdd    :
-    hunk.type === 'remove' ? Colors.diffRemove :
-                             Colors.diffContext
+// ── GitHub-dark palette ───────────────────────────────────────────────────────
+const G = {
+  surface:  '#0d1117',
+  header:   '#161b22',
+  border:   '#30363d',
+  lineNum:  '#6e7681',
 
+  add: {
+    bg:     'rgba(46,160,67,0.15)',
+    numBg:  'rgba(46,160,67,0.08)',
+    border: '#3fb950',
+    text:   '#aff5b4',
+    pfx:    '#3fb950',
+  },
+  del: {
+    bg:     'rgba(248,81,73,0.15)',
+    numBg:  'rgba(248,81,73,0.08)',
+    border: '#f85149',
+    text:   '#ffdcd7',
+    pfx:    '#f85149',
+  },
+  ctx: {
+    bg:     'transparent',
+    numBg:  'transparent',
+    border: 'transparent',
+    text:   '#c9d1d9',
+    pfx:    '#6e7681',
+  },
+  hunk: {
+    bg:   'rgba(121,192,255,0.08)',
+    text: '#79c0ff',
+  },
+}
+
+const FONT = FontFamily.mono
+const FS   = 12
+const LH   = 20
+const NW   = 40   // line number column width
+
+// ── Pre-process hunks into display items ──────────────────────────────────────
+type DisplayItem =
+  | { kind: 'header'; oldStart: number; newStart: number }
+  | { kind: 'line';   hunk: DiffHunk }
+
+function buildItems(hunks: DiffHunk[]): DisplayItem[] {
+  const out: DisplayItem[] = []
+  for (let i = 0; i < hunks.length; i++) {
+    const h    = hunks[i]
+    const prev = hunks[i - 1]
+    let needHeader = i === 0
+
+    if (!needHeader && prev) {
+      const prevEnd   = prev.type !== 'remove' ? prev.line_new : prev.line_old
+      const currStart = h.type   !== 'remove' ? h.line_new   : h.line_old
+      if (prevEnd != null && currStart != null && currStart > prevEnd + 1) needHeader = true
+    }
+
+    if (needHeader) {
+      out.push({ kind: 'header', oldStart: h.line_old ?? 0, newStart: h.line_new ?? 0 })
+    }
+    out.push({ kind: 'line', hunk: h })
+  }
+  return out
+}
+
+// ── Hunk header row ───────────────────────────────────────────────────────────
+function HunkHeaderRow({ oldStart, newStart }: { oldStart: number; newStart: number }) {
+  return (
+    <View style={styles.hunkRow}>
+      <View style={[styles.numCell, { backgroundColor: G.hunk.bg }]} />
+      <View style={[styles.numCell, { backgroundColor: G.hunk.bg }]} />
+      <View style={[styles.pfxCell, { backgroundColor: G.hunk.bg, borderLeftColor: 'transparent' }]} />
+      <Text style={styles.hunkText}>
+        {`@@ -${oldStart} +${newStart} @@`}
+      </Text>
+    </View>
+  )
+}
+
+// ── Single diff line ──────────────────────────────────────────────────────────
+function DiffLine({ hunk }: { hunk: DiffHunk }) {
+  const cfg    = hunk.type === 'add' ? G.add : hunk.type === 'remove' ? G.del : G.ctx
   const prefix = hunk.type === 'add' ? '+' : hunk.type === 'remove' ? '-' : ' '
+  const oldNum = hunk.type !== 'add'    ? String(hunk.line_old ?? '') : ''
+  const newNum = hunk.type !== 'remove' ? String(hunk.line_new ?? '') : ''
 
   return (
-    <View style={[styles.line, { backgroundColor: cfg.bg }]}>
-      <Text style={[styles.prefix, { color: cfg.text }]}>{prefix}</Text>
-      <Text style={[styles.lineText, { color: cfg.text }]} selectable>
+    <View style={[styles.lineRow, { backgroundColor: cfg.bg }]}>
+      <View style={[styles.numCell, { backgroundColor: cfg.numBg }]}>
+        <Text style={styles.numText}>{oldNum}</Text>
+      </View>
+      <View style={[styles.numCell, { backgroundColor: cfg.numBg }]}>
+        <Text style={styles.numText}>{newNum}</Text>
+      </View>
+      <View style={[styles.pfxCell, { backgroundColor: cfg.numBg, borderLeftColor: cfg.border }]}>
+        <Text style={[styles.pfxText, { color: cfg.pfx }]}>{prefix}</Text>
+      </View>
+      <Text style={[styles.codeText, { color: cfg.text }]} selectable>
         {hunk.content}
       </Text>
     </View>
   )
 }
 
-// ── Single file diff ──────────────────────────────────────────────────────────
-function FileDiffView({
+// ── File diff block ───────────────────────────────────────────────────────────
+function FileDiffBlock({
   diff,
   showHeader = true,
 }: {
-  diff:       FileDiff
+  diff:        FileDiff
   showHeader?: boolean
 }) {
   const [expanded, setExpanded] = useState(true)
   const stats = diff.stats ?? { added: 0, removed: 0 }
+  const items = useMemo(() => buildItems(diff.hunks ?? []), [diff.hunks])
 
   return (
     <View style={styles.fileBlock}>
@@ -45,37 +132,39 @@ function FileDiffView({
         <TouchableOpacity
           style={styles.fileHeader}
           onPress={() => setExpanded(e => !e)}
-          activeOpacity={0.7}
+          activeOpacity={0.8}
         >
           <View style={styles.fileHeaderLeft}>
-            <Text style={styles.langDot}>
-              {diff.language ?? 'txt'}
-            </Text>
-            <Text style={styles.fileName} numberOfLines={1}>
-              {diff.file_path}
-            </Text>
+            <Ionicons name="document-text-outline" size={13} color={G.lineNum} />
+            <Text style={styles.filePath} numberOfLines={1}>{diff.file_path}</Text>
             {diff.is_new_file && (
-              <View style={styles.newFileBadge}>
-                <Text style={styles.newFileText}>NEW</Text>
+              <View style={styles.newPill}>
+                <Text style={styles.newPillText}>NEW</Text>
               </View>
             )}
           </View>
           <View style={styles.fileHeaderRight}>
             <Text style={styles.statAdd}>+{stats.added}</Text>
-            <Text style={styles.statRemove}>-{stats.removed}</Text>
-            <Text style={styles.chevron}>{expanded ? '▲' : '▼'}</Text>
+            <Text style={styles.statDel}>-{stats.removed}</Text>
+            <Ionicons
+              name={expanded ? 'chevron-up' : 'chevron-down'}
+              size={14}
+              color={G.lineNum}
+            />
           </View>
         </TouchableOpacity>
       )}
 
       {expanded && (
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-          <View style={styles.hunks}>
-            {(diff.hunks ?? []).map((hunk, i) => (
-              <HunkLine key={i} hunk={hunk} />
-            ))}
-            {(diff.hunks ?? []).length === 0 && (
-              <Text style={styles.emptyHunks}>No diff available</Text>
+          <View style={{ minWidth: '100%' }}>
+            {items.map((item, i) =>
+              item.kind === 'header'
+                ? <HunkHeaderRow key={i} oldStart={item.oldStart} newStart={item.newStart} />
+                : <DiffLine      key={i} hunk={item.hunk} />
+            )}
+            {items.length === 0 && (
+              <Text style={styles.emptyText}>No diff available</Text>
             )}
           </View>
         </ScrollView>
@@ -84,159 +173,190 @@ function FileDiffView({
   )
 }
 
-// ── Main DiffViewer ───────────────────────────────────────────────────────────
-export function DiffViewer({ diff }: Props) {
-  if (!diff) return null
-
-  // multi_edit_diff contains multiple file diffs
-  if (diff.type === 'multi_edit_diff' && diff.files?.length) {
-    return (
-      <View style={styles.container}>
-        <View style={styles.grandStats}>
-          <Text style={styles.grandStatsText}>
-            {diff.file_count} file{diff.file_count !== 1 ? 's' : ''}
-            {'  '}
-            <Text style={styles.statAdd}>
-              +{diff.grand_stats?.added ?? 0}
-            </Text>
-            {'  '}
-            <Text style={styles.statRemove}>
-              -{diff.grand_stats?.removed ?? 0}
-            </Text>
-          </Text>
-        </View>
-        {diff.files.map((f, i) => (
-          <FileDiffView key={i} diff={f} showHeader />
-        ))}
-      </View>
-    )
-  }
-
-  // edit_diff may have nested edits
-  if (diff.type === 'edit_diff' && diff.edits?.length) {
-    return (
-      <View style={styles.container}>
-        {diff.edits.map((e, i) => (
-          <FileDiffView key={i} diff={e} showHeader={diff.edits!.length > 1} />
-        ))}
-      </View>
-    )
-  }
-
-  // Single file diff (file_diff or edit_diff without nested edits)
+// ── Grand stats bar (multi-file) ──────────────────────────────────────────────
+function GrandStatsBar({ diff }: { diff: FileDiff }) {
+  const count = diff.file_count ?? diff.files?.length ?? 0
+  const g     = diff.grand_stats ?? { added: 0, removed: 0 }
   return (
-    <View style={styles.container}>
-      <FileDiffView diff={diff} showHeader={false} />
+    <View style={styles.grandStats}>
+      <Text style={styles.grandStatsLabel}>
+        {count} file{count !== 1 ? 's' : ''} changed
+      </Text>
+      <Text style={styles.statAdd}>  +{g.added}</Text>
+      <Text style={styles.statDel}>  -{g.removed}</Text>
     </View>
   )
 }
 
-const MONO = Platform.OS === 'ios' ? 'Menlo' : 'monospace'
+// ── Main export ───────────────────────────────────────────────────────────────
+export function DiffViewer({ diff }: Props) {
+  if (!diff) return null
 
+  if (diff.type === 'multi_edit_diff' && diff.files?.length) {
+    return (
+      <View style={styles.container}>
+        <GrandStatsBar diff={diff} />
+        {diff.files.map((f, i) => <FileDiffBlock key={i} diff={f} showHeader />)}
+      </View>
+    )
+  }
+
+  if (diff.type === 'edit_diff' && diff.edits?.length) {
+    return (
+      <View style={styles.container}>
+        {diff.edits.map((e, i) => (
+          <FileDiffBlock key={i} diff={e} showHeader={diff.edits!.length > 1} />
+        ))}
+      </View>
+    )
+  }
+
+  return (
+    <View style={styles.container}>
+      <FileDiffBlock diff={diff} showHeader={false} />
+    </View>
+  )
+}
+
+// ── Styles ────────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   container: {
-    borderRadius:  Radius.md,
-    borderWidth:   0.5,
-    borderColor:   Colors.border,
-    overflow:      'hidden',
-    backgroundColor: Colors.bgSecondary,
+    borderRadius:    Radius.xs,
+    overflow:        'hidden',
+    backgroundColor: G.surface,
+    borderWidth:     1,
+    borderColor:     G.border,
   },
+
+  // Grand stats
   grandStats: {
-    padding:         Spacing.sm,
-    backgroundColor: Colors.bgTertiary,
-    borderBottomWidth: 0.5,
-    borderColor:     Colors.border,
+    flexDirection:     'row',
+    alignItems:        'center',
+    paddingHorizontal: Spacing.md,
+    paddingVertical:   Spacing.sm,
+    backgroundColor:   G.header,
+    borderBottomWidth: 1,
+    borderColor:       G.border,
   },
-  grandStatsText: {
-    fontSize:   FontSize.xs,
-    color:      Colors.textSecondary,
-    fontWeight: '500',
+  grandStatsLabel: {
+    fontFamily: FONT,
+    fontSize:   FS,
+    color:      G.lineNum,
   },
+
+  // Per-file block
   fileBlock: {
-    borderTopWidth: 0.5,
-    borderColor:    Colors.border,
+    borderTopWidth: 1,
+    borderColor:    G.border,
   },
   fileHeader: {
-    flexDirection:   'row',
-    alignItems:      'center',
-    justifyContent:  'space-between',
-    padding:         Spacing.sm,
-    backgroundColor: Colors.bgTertiary,
+    flexDirection:     'row',
+    alignItems:        'center',
+    justifyContent:    'space-between',
+    paddingHorizontal: Spacing.md,
+    paddingVertical:   10,
+    backgroundColor:   G.header,
   },
   fileHeaderLeft: {
     flexDirection: 'row',
     alignItems:    'center',
-    gap:           Spacing.xs,
+    gap:           6,
     flex:          1,
   },
-  langDot: {
-    fontSize:        FontSize.xs,
-    fontFamily:      MONO,
-    color:           Colors.primary,
-    backgroundColor: Colors.primaryLight,
-    paddingHorizontal: 5,
-    paddingVertical:   1,
-    borderRadius:    Radius.sm,
-  },
-  fileName: {
-    fontFamily: MONO,
-    fontSize:   FontSize.xs,
-    color:      Colors.textPrimary,
+  filePath: {
+    fontFamily: FONT,
+    fontSize:   FS,
+    color:      '#e6edf3',
     flex:       1,
   },
-  newFileBadge: {
-    backgroundColor: Colors.risk.low.bg,
+  newPill: {
+    backgroundColor:   'rgba(63,185,80,0.18)',
+    borderRadius:      4,
     paddingHorizontal: 5,
     paddingVertical:   1,
-    borderRadius:    Radius.sm,
   },
-  newFileText: {
-    fontSize:   FontSize.xs,
-    color:      Colors.risk.low.text,
-    fontWeight: '600',
+  newPillText: {
+    fontFamily: FONT,
+    fontSize:   10,
+    color:      '#3fb950',
+    fontWeight: '700',
   },
   fileHeaderRight: {
     flexDirection: 'row',
     alignItems:    'center',
-    gap:           Spacing.sm,
+    gap:           8,
   },
   statAdd: {
-    fontSize:   FontSize.xs,
+    fontFamily: FONT,
+    fontSize:   FS,
+    color:      '#3fb950',
     fontWeight: '600',
-    color:      Colors.risk.low.text,
   },
-  statRemove: {
-    fontSize:   FontSize.xs,
+  statDel: {
+    fontFamily: FONT,
+    fontSize:   FS,
+    color:      '#f85149',
     fontWeight: '600',
-    color:      Colors.risk.critical.text,
   },
-  chevron: {
-    fontSize: FontSize.xs,
-    color:    Colors.textTertiary,
-  },
-  hunks: {
-    minWidth: '100%',
-  },
-  line: {
+
+  // Hunk header
+  hunkRow: {
     flexDirection: 'row',
-    paddingHorizontal: Spacing.sm,
-    paddingVertical:   2,
+    alignItems:    'center',
   },
-  prefix: {
-    fontFamily: MONO,
-    fontSize:   FontSize.xs,
-    width:      14,
-    lineHeight: 18,
+  hunkText: {
+    fontFamily:  FONT,
+    fontSize:    FS,
+    color:       G.hunk.text,
+    lineHeight:  LH,
+    flex:        1,
+    paddingLeft: 8,
+    paddingVertical: 2,
+    backgroundColor: G.hunk.bg,
   },
-  lineText: {
-    fontFamily: MONO,
-    fontSize:   FontSize.xs,
-    lineHeight: 18,
-    flex:       1,
+
+  // Diff lines
+  lineRow: {
+    flexDirection: 'row',
   },
-  emptyHunks: {
-    padding:  Spacing.md,
-    color:    Colors.textTertiary,
-    fontSize: FontSize.xs,
+  numCell: {
+    width:          NW,
+    paddingRight:   6,
+    paddingVertical: 1,
+    alignItems:     'flex-end',
+    justifyContent: 'center',
+  },
+  numText: {
+    fontFamily: FONT,
+    fontSize:   FS - 1,
+    color:      G.lineNum,
+    lineHeight: LH,
+  },
+  pfxCell: {
+    width:           24,
+    alignItems:      'center',
+    justifyContent:  'center',
+    borderLeftWidth: 3,
+    paddingVertical: 1,
+  },
+  pfxText: {
+    fontFamily: FONT,
+    fontSize:   FS,
+    lineHeight: LH,
+    fontWeight: '700',
+  },
+  codeText: {
+    fontFamily:      FONT,
+    fontSize:        FS,
+    lineHeight:      LH,
+    paddingLeft:     8,
+    paddingRight:    16,
+    paddingVertical: 1,
+  },
+  emptyText: {
+    fontFamily: FONT,
+    fontSize:   FS,
+    color:      G.lineNum,
+    padding:    Spacing.md,
   },
 })

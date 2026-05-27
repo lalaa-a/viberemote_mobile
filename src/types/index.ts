@@ -1,6 +1,6 @@
 export type RiskLevel    = 'low' | 'medium' | 'high' | 'critical'
-export type ToolName     = 'Bash' | 'Write' | 'Edit' | 'MultiEdit'
-export type DisplayType  = 'bash' | 'write' | 'edit' | 'multi_edit' | 'unknown'
+export type ToolName     = 'Bash' | 'Write' | 'Edit' | 'MultiEdit' | 'Read'
+export type DisplayType  = 'bash' | 'write' | 'edit' | 'multi_edit' | 'read' | 'unknown'
 export type RequestStatus =
   | 'pending'
   | 'approved'
@@ -123,7 +123,19 @@ export type TabParamList = {
   RequestsTab:  NavigatorScreenParams<RequestsStackParamList> | undefined
   SessionsTab:  NavigatorScreenParams<SessionsStackParamList> | undefined
   MachinesTab:  undefined
-  HistoryTab:   undefined
+  TerminalTab:  undefined
+}
+
+export interface TerminalEvent {
+  id:         string
+  session_id: string
+  machine_id: string
+  event_type: 'tool_start' | 'tool_end' | 'notification' | 'stop'
+  tool_name:  string | null
+  summary:    string | null
+  detail:     string | null
+  status:     'success' | 'error' | null
+  created_at: string
 }
 
 export type RequestsStackParamList = {

@@ -1,16 +1,20 @@
-import React, { useState } from 'react'
+import React from 'react'
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   Alert, ActivityIndicator, StatusBar, Platform,
 } from 'react-native'
 import { useRoute, useNavigation } from '@react-navigation/native'
-import type { NativeStackNavigationProp, RouteProp } from '@react-navigation/native-stack'
+import type { RouteProp } from '@react-navigation/native'
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
 import { formatDistanceToNow } from 'date-fns'
 import { useRequest, useDecideRequest } from '../../hooks/useRequests'
 import { DiffViewer } from '../../components/DiffViewer/DiffViewer'
 import { RiskBadge } from '../../components/RiskBadge'
+import { GradientBackground } from '../../components/GradientBackground'
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../../constants/colors'
 import { useAppStore } from '../../store/useAppStore'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import Ionicons from 'react-native-vector-icons/Ionicons'
 import type { RequestsStackParamList } from '../../types'
 
 type Route = RouteProp<RequestsStackParamList, 'RequestDetail'>
@@ -26,10 +30,10 @@ export function RequestDetailScreen() {
   const { data: request, isLoading } = useRequest(id)
   const decide    = useDecideRequest()
   const showToast = useAppStore(s => s.showToast)
+  const insets    = useSafeAreaInsets()
 
   async function handleDecide(decision: 'approved' | 'denied') {
     if (!request) return
-
     const label = decision === 'approved' ? 'Approve' : 'Deny'
     Alert.alert(
       `${label} this request?`,
@@ -58,134 +62,149 @@ export function RequestDetailScreen() {
 
   if (isLoading || !request) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={Colors.primary} />
-      </View>
+      <GradientBackground>
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color={Colors.accent} />
+        </View>
+      </GradientBackground>
     )
   }
 
   const alreadyDecided = request.status !== 'pending'
   const timeAgo = formatDistanceToNow(new Date(request.created_at), { addSuffix: true })
+  const riskCfg = Colors.risk[request.risk_level] ?? Colors.risk.low
 
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor={Colors.bgPrimary} />
+    <GradientBackground>
+      <StatusBar barStyle="dark-content" translucent backgroundColor="transparent" />
+
+      {/* Custom back button row */}
+      <View style={[styles.backRow, { paddingTop: insets.top + 4 }]}>
+        <TouchableOpacity
+          onPress={() => navigation.goBack()}
+          style={styles.backBtn}
+          activeOpacity={0.7}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Ionicons name="chevron-back" size={20} color={Colors.textSecondary} />
+          <Text style={styles.backLabel}>Back</Text>
+        </TouchableOpacity>
+      </View>
 
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        {/* ── Header ── */}
+        {/* ── Header card ── */}
         <View style={styles.headerCard}>
+          {/* Risk whisper */}
+          <View style={[styles.whisper, { backgroundColor: riskCfg.whisper }]} />
+
           <View style={styles.headerTop}>
             <Text style={styles.toolName}>{request.tool_name}</Text>
             <RiskBadge level={request.risk_level} />
           </View>
           <Text style={styles.summary}>{request.summary}</Text>
-          <View style={styles.metaRow}>
-            <View style={styles.metaItem}>
-              <Text style={styles.metaLabel}>Machine</Text>
-              <View style={styles.metaValueRow}>
+
+          <View style={styles.divider} />
+
+          <View style={styles.infoRow}>
+            <View style={styles.infoItem}>
+              <Text style={styles.infoLabel}>MACHINE</Text>
+              <View style={styles.machineRow}>
                 <View style={[
                   styles.onlineDot,
-                  { backgroundColor: request.machines?.is_online
-                    ? Colors.success : Colors.textTertiary }
+                  { backgroundColor: request.machines?.is_online ? Colors.success : Colors.textTertiary },
                 ]} />
-                <Text style={styles.metaValue}>
-                  {request.machines?.label ?? 'Unknown'}
-                </Text>
+                <Text style={styles.infoValue}>{request.machines?.label ?? 'Unknown'}</Text>
               </View>
             </View>
-            <View style={styles.metaItem}>
-              <Text style={styles.metaLabel}>Risk</Text>
-              <Text style={styles.metaValue}>{request.risk_reason}</Text>
+            <View style={styles.infoItem}>
+              <Text style={styles.infoLabel}>RISK</Text>
+              <Text style={styles.infoValue} numberOfLines={2}>{request.risk_reason ?? '—'}</Text>
             </View>
-            <View style={styles.metaItem}>
-              <Text style={styles.metaLabel}>Time</Text>
-              <Text style={styles.metaValue}>{timeAgo}</Text>
+            <View style={styles.infoItem}>
+              <Text style={styles.infoLabel}>TIME</Text>
+              <Text style={styles.infoValue}>{timeAgo}</Text>
             </View>
           </View>
         </View>
 
         {/* ── Bash command ── */}
         {request.command && (
-          <Section title="Command">
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>BASH COMMAND</Text>
             <View style={styles.codeBlock}>
               <Text style={styles.dollarSign}>$</Text>
-              <Text style={styles.commandText} selectable>
-                {request.command}
-              </Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }}>
+                <Text style={styles.commandText} selectable>{request.command}</Text>
+              </ScrollView>
             </View>
-          </Section>
+          </View>
         )}
 
-        {/* ── Files affected ── */}
+        {/* ── Files ── */}
         {request.files_affected?.length > 0 && (
-          <Section title={`Files (${request.files_affected.length})`}>
-            <View style={styles.filesList}>
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>FILES · {request.files_affected.length}</Text>
+            <View style={styles.filesCard}>
               {request.files_affected.map((f, i) => (
-                <View key={i} style={styles.fileRow}>
-                  <Text style={styles.fileIcon}>F</Text>
-                  <Text style={styles.fileText} selectable numberOfLines={1}>
-                    {f}
-                  </Text>
+                <View key={i} style={[
+                  styles.fileRow,
+                  i < request.files_affected.length - 1 && styles.fileRowBorder,
+                ]}>
+                  <Ionicons name="document-outline" size={14} color={Colors.textTertiary} />
+                  <Text style={styles.filePath} selectable numberOfLines={1}>{f}</Text>
                 </View>
               ))}
             </View>
-          </Section>
+          </View>
         )}
 
-        {/* ── Diff viewer ── */}
+        {/* ── Diff ── */}
         {request.diff && (
-          <Section
-            title={`Changes  +${
-              request.diff.grand_stats?.added ?? request.diff.stats?.added ?? 0
-            }  -${
-              request.diff.grand_stats?.removed ?? request.diff.stats?.removed ?? 0
-            }`}
-          >
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>
+              CHANGES · +{request.diff.grand_stats?.added ?? request.diff.stats?.added ?? 0}
+              {'  '}−{request.diff.grand_stats?.removed ?? request.diff.stats?.removed ?? 0}
+            </Text>
             <DiffViewer diff={request.diff} />
-          </Section>
+          </View>
         )}
 
-        {/* ── Already decided banner ── */}
+        {/* ── Decision banner ── */}
         {alreadyDecided && (
           <View style={[
             styles.decidedBanner,
             {
-              backgroundColor: request.status === 'approved'
-                ? Colors.risk.low.bg
-                : Colors.risk.critical.bg,
-              borderColor: request.status === 'approved'
-                ? Colors.risk.low.border
-                : Colors.risk.critical.border,
+              backgroundColor: request.status === 'approved' ? Colors.risk.low.bg : Colors.risk.critical.bg,
+              borderColor:     request.status === 'approved' ? Colors.risk.low.border : Colors.risk.critical.border,
             },
           ]}>
+            <Ionicons
+              name={request.status === 'approved' ? 'checkmark-circle' : 'close-circle'}
+              size={16}
+              color={request.status === 'approved' ? Colors.risk.low.text : Colors.risk.critical.text}
+            />
             <Text style={[
               styles.decidedText,
-              {
-                color: request.status === 'approved'
-                  ? Colors.risk.low.text
-                  : Colors.risk.critical.text,
-              },
+              { color: request.status === 'approved' ? Colors.risk.low.text : Colors.risk.critical.text },
             ]}>
-              {request.status === 'approved' ? '✓' : '✕'}{' '}
-              {request.status.charAt(0).toUpperCase() + request.status.slice(1)}
+              {request.status === 'approved' ? 'Approved' : 'Denied'}
               {request.decided_by ? ` via ${request.decided_by}` : ''}
             </Text>
           </View>
         )}
 
-        {/* Padding for bottom buttons */}
-        <View style={{ height: 100 }} />
+        <View style={{ height: 130 }} />
       </ScrollView>
 
-      {/* ── Approve / Deny buttons ── */}
+      {/* ── Sticky footer ── */}
       {!alreadyDecided && (
-        <View style={styles.actions}>
+        <View style={[styles.footer, { paddingBottom: insets.bottom + 92 }]}>
           <TouchableOpacity
-            style={[styles.btn, styles.denyBtn]}
+            style={styles.denyBtn}
             onPress={() => handleDecide('denied')}
             disabled={decide.isPending}
             activeOpacity={0.8}
@@ -193,58 +212,71 @@ export function RequestDetailScreen() {
             <Text style={styles.denyText}>Deny</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.btn, styles.approveBtn]}
+            style={styles.approveBtn}
             onPress={() => handleDecide('approved')}
             disabled={decide.isPending}
             activeOpacity={0.8}
           >
             {decide.isPending
-              ? <ActivityIndicator color={Colors.white} />
+              ? <ActivityIndicator color={Colors.textInverse} />
               : <Text style={styles.approveText}>Approve</Text>
             }
           </TouchableOpacity>
         </View>
       )}
-    </View>
-  )
-}
-
-// ── Section wrapper ───────────────────────────────────────────────────────────
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <View style={styles.section}>
-      <Text style={styles.sectionTitle}>{title}</Text>
-      {children}
-    </View>
+    </GradientBackground>
   )
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex:            1,
-    backgroundColor: Colors.bgSecondary,
+
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+
+  // Back row
+  backRow: {
+    paddingHorizontal: Spacing.px12,
+    paddingBottom:     Spacing.px4,
   },
-  center: {
-    flex:           1,
-    alignItems:     'center',
-    justifyContent: 'center',
+  backBtn: {
+    flexDirection: 'row',
+    alignItems:    'center',
+    gap:           5,
+    alignSelf:     'flex-start',
+    paddingHorizontal: Spacing.px8,
+    paddingVertical:   Spacing.px8,
   },
+  backLabel: {
+    fontSize:   FontSize.cardTitle,
+    color:      Colors.textSecondary,
+    fontWeight: '500',
+  },
+
   scroll: { flex: 1 },
   content: {
-    padding:     Spacing.lg,
-    paddingBottom: Spacing.xxxl,
-    gap:         Spacing.md,
+    padding:       Spacing.px20,
+    paddingTop:    Spacing.px8,
+    paddingBottom: Spacing.px32,
+    gap:           Spacing.px16,
   },
 
   // Header card
   headerCard: {
-    backgroundColor: Colors.cardBg,
-    borderRadius:    Radius.lg,
-    padding:         Spacing.lg,
-    gap:             Spacing.md,
-    borderWidth:     0.5,
-    borderColor:     Colors.border,
-    ...Shadow.card,
+    backgroundColor: Colors.bgPrimary,
+    borderRadius:    Radius.md,
+    padding:         Spacing.px20,
+    gap:             Spacing.px12,
+    borderWidth:     1,
+    borderColor:     Colors.borderHairline,
+    borderTopColor:  Colors.borderGlass,
+    overflow:        'hidden',
+    ...Shadow.glassLow,
+  },
+  whisper: {
+    position: 'absolute',
+    top:      0,
+    left:     0,
+    right:    0,
+    height:   56,
   },
   headerTop: {
     flexDirection:  'row',
@@ -252,170 +284,162 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   toolName: {
-    fontSize:   FontSize.xl,
-    fontWeight: '700',
-    color:      Colors.textPrimary,
+    fontSize:      FontSize.displayM,
+    fontWeight:    '500',
+    fontFamily:    'Fraunces-SemiBold',
+    color:         Colors.textPrimary,
+    letterSpacing: -0.4,
   },
   summary: {
-    fontSize:   FontSize.md,
+    fontSize:   FontSize.body,
     color:      Colors.textSecondary,
     lineHeight: 22,
   },
-  metaRow: {
-    flexDirection:  'row',
-    gap:            Spacing.xl,
-    paddingTop:     Spacing.sm,
-    borderTopWidth: 0.5,
-    borderColor:    Colors.borderLight,
+  divider: {
+    height:          1,
+    backgroundColor: Colors.borderHairline,
   },
-  metaItem: {
-    gap: 3,
-    flex: 1,
-  },
-  metaLabel: {
-    fontSize:  FontSize.xs,
-    color:     Colors.textTertiary,
-    fontWeight:'600',
-    textTransform: 'uppercase',
-    letterSpacing:  0.5,
-  },
-  metaValueRow: {
+  infoRow: {
     flexDirection: 'row',
-    alignItems:    'center',
-    gap:           4,
+    gap:           Spacing.px16,
   },
-  onlineDot: {
-    width:        6,
-    height:       6,
-    borderRadius: Radius.full,
+  infoItem: { flex: 1, gap: 4 },
+  infoLabel: {
+    fontSize:      FontSize.microLabel,
+    color:         Colors.textTertiary,
+    fontWeight:    '600',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
   },
-  metaValue: {
-    fontSize:  FontSize.xs,
-    color:     Colors.textSecondary,
-    fontWeight:'500',
-    flex:      1,
+  machineRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  onlineDot: { width: 5, height: 5, borderRadius: Radius.full },
+  infoValue: {
+    fontSize:   FontSize.label,
+    color:      Colors.textPrimary,
+    fontWeight: '500',
+    flex:       1,
   },
-
   // Sections
-  section: {
-    gap: Spacing.sm,
-  },
-  sectionTitle: {
-    fontSize:      FontSize.xs,
+  section: { gap: Spacing.px8 },
+  sectionLabel: {
+    fontSize:      FontSize.microLabel,
     fontWeight:    '600',
     color:         Colors.textTertiary,
+    letterSpacing: 0.6,
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
   },
 
-  // Command block
+  // Code block
   codeBlock: {
     flexDirection:   'row',
-    backgroundColor: Colors.bgTertiary,
+    backgroundColor: Colors.codeBg,
     borderRadius:    Radius.md,
-    padding:         Spacing.md,
-    gap:             Spacing.sm,
-    borderWidth:     0.5,
-    borderColor:     Colors.border,
+    padding:         Spacing.px16,
+    gap:             Spacing.px8,
+    alignItems:      'flex-start',
   },
   dollarSign: {
     fontFamily: MONO,
-    fontSize:   FontSize.sm,
-    color:      Colors.textTertiary,
+    fontSize:   FontSize.monoSmall,
+    color:      Colors.accent,
     lineHeight: 20,
+    marginTop:  1,
   },
   commandText: {
     fontFamily: MONO,
-    fontSize:   FontSize.sm,
-    color:      Colors.textPrimary,
-    flex:       1,
+    fontSize:   FontSize.monoSmall,
+    color:      Colors.codeText,
     lineHeight: 20,
   },
 
-  // Files list
-  filesList: {
-    backgroundColor: Colors.cardBg,
-    borderRadius:    Radius.md,
-    borderWidth:     0.5,
-    borderColor:     Colors.border,
+  // Files card
+  filesCard: {
+    backgroundColor: Colors.bgPrimary,
+    borderRadius:    Radius.sm,
+    borderWidth:     1,
+    borderColor:     Colors.borderHairline,
+    borderTopColor:  Colors.borderGlass,
     overflow:        'hidden',
   },
   fileRow: {
-    flexDirection:   'row',
-    alignItems:      'center',
-    gap:             Spacing.sm,
-    padding:         Spacing.md,
-    borderBottomWidth: 0.5,
-    borderColor:     Colors.borderLight,
+    flexDirection: 'row',
+    alignItems:    'center',
+    gap:           Spacing.px8,
+    padding:       Spacing.px12,
   },
-  fileIcon: {
-    fontSize:        FontSize.xs,
-    fontWeight:      '700',
-    color:           Colors.primary,
-    backgroundColor: Colors.primaryLight,
-    width:           18,
-    height:          18,
-    textAlign:       'center',
-    lineHeight:      18,
-    borderRadius:    Radius.sm,
+  fileRowBorder: {
+    borderBottomWidth: 1,
+    borderColor:       Colors.borderHairline,
   },
-  fileText: {
+  filePath: {
     fontFamily: MONO,
-    fontSize:   FontSize.xs,
+    fontSize:   FontSize.monoSmall,
     color:      Colors.textPrimary,
     flex:       1,
   },
 
-  // Decided banner
+  // Decision banner
   decidedBanner: {
-    borderRadius: Radius.md,
-    padding:      Spacing.md,
-    borderWidth:  0.5,
-    alignItems:   'center',
+    flexDirection:  'row',
+    alignItems:     'center',
+    justifyContent: 'center',
+    gap:            Spacing.px8,
+    borderRadius:   Radius.md,
+    padding:        Spacing.px16,
+    borderWidth:    1,
   },
   decidedText: {
-    fontSize:   FontSize.sm,
+    fontSize:   FontSize.label,
     fontWeight: '600',
+    fontStyle:  'italic',
   },
 
-  // Action buttons
-  actions: {
+  // Sticky footer
+  footer: {
     position:        'absolute',
     bottom:          0,
     left:            0,
     right:           0,
     flexDirection:   'row',
-    gap:             Spacing.md,
-    padding:         Spacing.lg,
-    paddingBottom:   Platform.OS === 'ios' ? 32 : Spacing.lg,
-    backgroundColor: Colors.bgPrimary,
-    borderTopWidth:  0.5,
-    borderColor:     Colors.border,
+    gap:             Spacing.px12,
+    paddingHorizontal: Spacing.px20,
+    paddingTop:      Spacing.px16,
+    backgroundColor: Colors.surfaceGlassStrong,
+    borderTopWidth:  1,
+    borderColor:     Colors.borderHairline,
+    borderTopColor:  Colors.borderGlass,
+    alignItems:      'flex-end',
     ...Shadow.modal,
   },
-  btn: {
+
+  denyBtn: {
     flex:           1,
-    paddingVertical: Spacing.lg,
-    borderRadius:   Radius.md,
+    height:         48,
+    borderRadius:   Radius.full,
+    borderWidth:    1.5,
+    borderColor:    Colors.danger + '80',
     alignItems:     'center',
     justifyContent: 'center',
-  },
-  denyBtn: {
-    backgroundColor: Colors.bgSecondary,
-    borderWidth:     0.5,
-    borderColor:     Colors.border,
+    marginBottom: Spacing.px12,
   },
   denyText: {
-    fontSize:   FontSize.md,
+    fontSize:   FontSize.label,
     fontWeight: '600',
     color:      Colors.danger,
   },
   approveBtn: {
-    backgroundColor: Colors.primary,
+    flex:            1,
+    height:          56,
+    borderRadius:    Radius.full,
+    backgroundColor: Colors.accentDeep,
+    alignItems:      'center',
+    justifyContent:  'center',
+    marginBottom: Spacing.px12,
+    ...Shadow.inkPill,
   },
   approveText: {
-    fontSize:   FontSize.md,
+    fontSize:   FontSize.body,
     fontWeight: '600',
-    color:      Colors.white,
+    color:      Colors.textInverse,
   },
 })

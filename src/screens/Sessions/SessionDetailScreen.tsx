@@ -1,16 +1,20 @@
 import React from 'react'
 import {
-  View, Text, FlatList, StyleSheet,
+  View, Text, StyleSheet,
   TouchableOpacity, StatusBar, ActivityIndicator,
   SectionList,
 } from 'react-native'
 import { useRoute, useNavigation } from '@react-navigation/native'
 import type { RouteProp } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { formatDistanceToNow } from 'date-fns'
+import Ionicons from 'react-native-vector-icons/Ionicons'
 import { useSessionRequests, usePrompts, useCancelPrompt } from '../../hooks/useSessions'
+import { useDecideRequest } from '../../hooks/useRequests'
 import { RequestCard } from '../../components/RequestCard'
-import { Colors, Spacing, Radius, FontSize, Shadow } from '../../constants/colors'
+import { GradientBackground } from '../../components/GradientBackground'
+import { Colors, Spacing, Radius, FontSize, Shadow, TAB_BOTTOM_INSET } from '../../constants/colors'
 import type { SessionsStackParamList, PendingRequest, MobileCommand } from '../../types'
 
 type Route = RouteProp<SessionsStackParamList, 'SessionDetail'>
@@ -19,29 +23,30 @@ type Nav   = NativeStackNavigationProp<SessionsStackParamList>
 export function SessionDetailScreen() {
   const route      = useRoute<Route>()
   const navigation = useNavigation<Nav>()
+  const insets     = useSafeAreaInsets()
   const { sessionId, machineLabel, cwd, machineIsOnline } = route.params
 
   const { data: requests = [], isLoading: reqLoading } = useSessionRequests(sessionId)
   const { data: allPrompts = [] }                      = usePrompts()
   const cancelPrompt                                   = useCancelPrompt()
+  const decide                                         = useDecideRequest()
 
   const prompts = allPrompts.filter(p => p.session_id === sessionId)
 
-  function renderRequest({ item }: { item: PendingRequest }) {
-    return (
-      <RequestCard
-        request={item}
-        onPress={() => navigation.navigate('RequestDetail', { id: item.id })}
-      />
-    )
-  }
-
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor={Colors.bgPrimary} />
+    <GradientBackground>
+      <StatusBar barStyle="dark-content" translucent backgroundColor="transparent" />
 
-      {/* Header */}
-      <View style={styles.header}>
+      {/* Custom header */}
+      <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
+        <TouchableOpacity
+          onPress={() => navigation.goBack()}
+          style={styles.backBtn}
+          activeOpacity={0.7}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Ionicons name="chevron-back" size={20} color={Colors.textSecondary} />
+        </TouchableOpacity>
         <View style={styles.headerInfo}>
           <Text style={styles.cwd} numberOfLines={1}>{cwd ?? '~'}</Text>
           <Text style={styles.machine}>{machineLabel}</Text>
@@ -58,11 +63,11 @@ export function SessionDetailScreen() {
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.actionBtn, styles.actionBtnPrimary]}
+            style={[styles.actionBtn, styles.actionBtnPrompt]}
             onPress={() => navigation.navigate('PromptCompose', { sessionId })}
-            activeOpacity={0.7}
+            activeOpacity={0.8}
           >
-            <Text style={styles.actionBtnPrimaryText}>Prompt</Text>
+            <Text style={styles.actionBtnPromptText}>Prompt</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -71,12 +76,12 @@ export function SessionDetailScreen() {
         contentContainerStyle={styles.listContent}
         sections={[
           {
-            title: `PENDING REQUESTS${requests.length > 0 ? ` (${requests.length})` : ''}`,
+            title: `PENDING REQUESTS${requests.length > 0 ? ` · ${requests.length}` : ''}`,
             data:  requests,
             key:   'requests',
           },
           {
-            title: 'SENT PROMPTS',
+            title: `SENT PROMPTS${prompts.length > 0 ? ` · ${prompts.length}` : ''}`,
             data:  prompts,
             key:   'prompts',
           },
@@ -92,6 +97,8 @@ export function SessionDetailScreen() {
               <RequestCard
                 request={req}
                 onPress={() => navigation.navigate('RequestDetail', { id: req.id })}
+                onApprove={() => decide.mutate({ id: req.id, decision: 'approved' })}
+                onDeny={() => decide.mutate({ id: req.id, decision: 'denied' })}
               />
             )
           }
@@ -103,14 +110,14 @@ export function SessionDetailScreen() {
           if (section.key === 'requests' && !reqLoading && requests.length === 0) {
             return (
               <View style={styles.sectionEmpty}>
-                <Text style={styles.sectionEmptyText}>No pending requests</Text>
+                <Text style={styles.sectionEmptyText}>No pending requests.</Text>
               </View>
             )
           }
           if (section.key === 'prompts' && prompts.length === 0) {
             return (
               <View style={styles.sectionEmpty}>
-                <Text style={styles.sectionEmptyText}>No prompts sent yet</Text>
+                <Text style={styles.sectionEmptyText}>No prompts sent yet.</Text>
               </View>
             )
           }
@@ -120,21 +127,17 @@ export function SessionDetailScreen() {
       />
 
       {reqLoading && (
-        <ActivityIndicator
-          style={styles.loader}
-          size="small"
-          color={Colors.primary}
-        />
+        <ActivityIndicator style={styles.loader} size="small" color={Colors.accent} />
       )}
-    </View>
+    </GradientBackground>
   )
 }
 
 function PromptRow({ cmd, onCancel }: { cmd: MobileCommand; onCancel: () => void }) {
   const STATUS_ICON: Record<string, string> = {
-    pending:   '⏳',
-    delivered: '✓',
-    cancelled: '✕',
+    pending:   'hourglass-outline',
+    delivered: 'checkmark-circle',
+    cancelled: 'close-circle',
   }
   const STATUS_COLOR: Record<string, string> = {
     pending:   Colors.warning,
@@ -142,18 +145,16 @@ function PromptRow({ cmd, onCancel }: { cmd: MobileCommand; onCancel: () => void
     cancelled: Colors.textTertiary,
   }
 
-  const icon  = STATUS_ICON[cmd.status]  ?? '?'
-  const color = STATUS_COLOR[cmd.status] ?? Colors.textTertiary
-  const timeAgo = formatDistanceToNow(new Date(cmd.created_at), { addSuffix: true })
+  const iconName = STATUS_ICON[cmd.status] ?? 'ellipsis-horizontal'
+  const color    = STATUS_COLOR[cmd.status] ?? Colors.textTertiary
+  const timeAgo  = formatDistanceToNow(new Date(cmd.created_at), { addSuffix: true })
 
   return (
     <View style={styles.promptRow}>
-      <Text style={[styles.promptIcon, { color }]}>{icon}</Text>
+      <Ionicons name={iconName} size={16} color={color} style={{ marginTop: 2 }} />
       <View style={styles.promptBody}>
         <Text style={styles.promptText} numberOfLines={2}>{cmd.prompt}</Text>
-        <Text style={styles.promptMeta}>
-          {cmd.status} · {timeAgo}
-        </Text>
+        <Text style={styles.promptMeta}>{cmd.status} · {timeAgo}</Text>
       </View>
       {cmd.status === 'pending' && (
         <TouchableOpacity onPress={onCancel} style={styles.cancelBtn} activeOpacity={0.7}>
@@ -165,139 +166,130 @@ function PromptRow({ cmd, onCancel }: { cmd: MobileCommand; onCancel: () => void
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex:            1,
-    backgroundColor: Colors.bgSecondary,
-  },
   header: {
-    flexDirection:     'row',
-    alignItems:        'center',
-    justifyContent:    'space-between',
-    paddingHorizontal: Spacing.lg,
-    paddingVertical:   Spacing.md,
-    backgroundColor:   Colors.bgPrimary,
-    borderBottomWidth: 0.5,
-    borderColor:       Colors.border,
+    flexDirection:  'row',
+    alignItems:     'center',
+    paddingLeft:    Spacing.px12,
+    paddingRight:   Spacing.px20,
+    paddingBottom:  Spacing.px16,
+    gap:            Spacing.px8,
   },
-  headerInfo: {
-    flex: 1,
-    gap:  2,
+  backBtn: {
+    width:          36,
+    height:         36,
+    alignItems:     'center',
+    justifyContent: 'center',
+    flexShrink:     0,
   },
+  headerInfo: { flex: 1, gap: 2 },
   cwd: {
-    fontFamily: 'monospace',
-    fontSize:   FontSize.md,
+    fontSize:   FontSize.mono,
     fontWeight: '600',
     color:      Colors.textPrimary,
   },
   machine: {
-    fontSize:  FontSize.xs,
-    color:     Colors.textTertiary,
+    fontSize: FontSize.metadata,
+    color:    Colors.textTertiary,
   },
   headerActions: {
     flexDirection: 'row',
-    gap:           Spacing.sm,
+    gap:           Spacing.px8,
   },
   actionBtn: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical:   Spacing.sm,
+    paddingHorizontal: Spacing.px12,
+    paddingVertical:   Spacing.px8,
     borderRadius:      Radius.sm,
-    borderWidth:       0.5,
-    borderColor:       Colors.border,
+    borderWidth:       1,
+    borderColor:       Colors.borderHairline,
+    borderTopColor:    Colors.borderGlass,
+    backgroundColor:   Colors.surfaceGlassStrong,
+    minHeight:         36,
+    justifyContent:    'center',
   },
-  actionBtnPrimary: {
-    backgroundColor: Colors.primary,
-    borderColor:     Colors.primary,
+  actionBtnPrompt: {
+    backgroundColor: Colors.inkBlack,
+    borderColor:     Colors.inkBlack,
+    ...Shadow.inkPill,
   },
-  actionBtnDisabled: {
-    borderColor: Colors.borderLight,
-    opacity:     0.5,
-  },
+  actionBtnDisabled: { opacity: 0.45 },
   actionBtnText: {
-    fontSize:   FontSize.sm,
+    fontSize:   FontSize.label,
     fontWeight: '500',
     color:      Colors.textSecondary,
   },
-  actionBtnTextDisabled: {
-    color: Colors.textTertiary,
-  },
-  actionBtnPrimaryText: {
-    fontSize:   FontSize.sm,
+  actionBtnTextDisabled: { color: Colors.textTertiary },
+  actionBtnPromptText: {
+    fontSize:   FontSize.label,
     fontWeight: '600',
-    color:      Colors.white,
+    color:      Colors.textInverse,
   },
   listContent: {
-    paddingBottom: Spacing.xxxl,
+    paddingBottom: TAB_BOTTOM_INSET,
   },
   sectionHeader: {
-    fontSize:          FontSize.xs,
+    fontSize:          FontSize.microLabel,
     fontWeight:        '600',
     color:             Colors.textTertiary,
     textTransform:     'uppercase',
-    letterSpacing:     0.5,
-    paddingHorizontal: Spacing.lg,
-    paddingTop:        Spacing.lg,
-    paddingBottom:     Spacing.sm,
+    letterSpacing:     0.6,
+    paddingHorizontal: Spacing.px20,
+    paddingTop:        Spacing.px16,
+    paddingBottom:     Spacing.px8,
   },
   sectionEmpty: {
-    marginHorizontal: Spacing.lg,
-    paddingVertical:  Spacing.md,
+    marginHorizontal: Spacing.px20,
+    paddingVertical:  Spacing.px16,
     alignItems:       'center',
-    backgroundColor:  Colors.cardBg,
+    backgroundColor:  Colors.surfaceGlassStrong,
     borderRadius:     Radius.md,
-    borderWidth:      0.5,
-    borderColor:      Colors.border,
+    borderWidth:      1,
+    borderColor:      Colors.borderHairline,
   },
   sectionEmptyText: {
-    fontSize:  FontSize.sm,
+    fontSize:  FontSize.label,
     color:     Colors.textTertiary,
+    fontStyle: 'italic',
   },
   loader: {
     position: 'absolute',
-    top:      Spacing.lg,
-    right:    Spacing.lg,
+    top:      Spacing.px20,
+    right:    Spacing.px20,
   },
 
-  // Prompt row
   promptRow: {
     flexDirection:     'row',
     alignItems:        'flex-start',
-    gap:               Spacing.sm,
-    marginHorizontal:  Spacing.lg,
-    marginVertical:    Spacing.xs,
-    backgroundColor:   Colors.cardBg,
+    gap:               Spacing.px12,
+    marginHorizontal:  Spacing.px20,
+    marginVertical:    4,
+    backgroundColor:   Colors.surfaceGlass,
     borderRadius:      Radius.md,
-    borderWidth:       0.5,
-    borderColor:       Colors.border,
-    padding:           Spacing.md,
-    ...Shadow.card,
+    borderWidth:       1,
+    borderColor:       Colors.borderHairline,
+    borderTopColor:    Colors.borderGlass,
+    padding:           Spacing.px12,
+    ...Shadow.glassLow,
   },
-  promptIcon: {
-    fontSize:   FontSize.md,
-    lineHeight: 20,
-  },
-  promptBody: {
-    flex: 1,
-    gap:  3,
-  },
+  promptBody: { flex: 1, gap: 3 },
   promptText: {
-    fontSize:   FontSize.sm,
+    fontSize:   FontSize.label,
     color:      Colors.textPrimary,
     lineHeight: 18,
   },
   promptMeta: {
-    fontSize:  FontSize.xs,
+    fontSize:  FontSize.metadata,
     color:     Colors.textTertiary,
   },
   cancelBtn: {
-    paddingHorizontal: Spacing.sm,
+    paddingHorizontal: Spacing.px8,
     paddingVertical:   3,
     borderRadius:      Radius.sm,
-    borderWidth:       0.5,
-    borderColor:       Colors.risk.medium.border,
+    borderWidth:       1,
+    borderColor:       Colors.warning + '60',
   },
   cancelText: {
-    fontSize:   FontSize.xs,
-    color:      Colors.risk.medium.text,
+    fontSize:   FontSize.metadata,
+    color:      Colors.warning,
     fontWeight: '500',
   },
 })

@@ -1,64 +1,47 @@
 import React from 'react'
 import { View, Text, StyleSheet } from 'react-native'
+import Ionicons from 'react-native-vector-icons/Ionicons'
 import { Colors, Radius, FontSize } from '../constants/colors'
 import type { RiskLevel } from '../types'
 
 interface Props {
-  level: RiskLevel
+  level:     RiskLevel
   showIcon?: boolean
 }
 
-const RISK_CONFIG: Record<RiskLevel, {
-  label: string
-  icon:  string
-  style: { bg: string; text: string; border: string }
-}> = {
-  low:      { label: 'Low',      icon: '✓', style: Colors.risk.low      },
-  medium:   { label: 'Medium',   icon: '!', style: Colors.risk.medium   },
-  high:     { label: 'High',     icon: '!!',style: Colors.risk.high     },
-  critical: { label: 'Critical', icon: '✕', style: Colors.risk.critical },
+const RISK_CONFIG: Record<RiskLevel, { label: string; icon: string }> = {
+  low:      { label: 'Low',      icon: 'checkmark'     },
+  medium:   { label: 'Medium',   icon: 'alert-outline' },
+  high:     { label: 'High',     icon: 'alert'         },
+  critical: { label: 'Critical', icon: 'close'         },
 }
 
 export function RiskBadge({ level, showIcon = true }: Props) {
-  const cfg = RISK_CONFIG[level] ?? RISK_CONFIG.low
+  const cfg   = RISK_CONFIG[level] ?? RISK_CONFIG.low
+  const color = Colors.risk[level] ?? Colors.risk.low
 
   return (
-    <View style={[
-      styles.badge,
-      {
-        backgroundColor: cfg.style.bg,
-        borderColor:     cfg.style.border,
-      },
-    ]}>
-      {showIcon && (
-        <Text style={[styles.icon, { color: cfg.style.text }]}>
-          {cfg.icon}
-        </Text>
-      )}
-      <Text style={[styles.label, { color: cfg.style.text }]}>
-        {cfg.label}
-      </Text>
+    <View style={[styles.badge, { backgroundColor: color.bg, borderColor: color.border }]}>
+      <Ionicons name={cfg.icon} size={10} color={color.text} />
+      <Text style={[styles.label, { color: color.text }]}>{cfg.label}</Text>
     </View>
   )
 }
 
 const styles = StyleSheet.create({
   badge: {
-    flexDirection:  'row',
-    alignItems:     'center',
-    gap:            4,
+    flexDirection:     'row',
+    alignItems:        'center',
+    gap:               3,
     paddingHorizontal: 8,
     paddingVertical:   3,
-    borderRadius:   Radius.sm,
-    borderWidth:    0.5,
-  },
-  icon: {
-    fontSize:   FontSize.xs,
-    fontWeight: '700',
+    borderRadius:      Radius.full,
+    borderWidth:       1,
   },
   label: {
-    fontSize:   FontSize.xs,
-    fontWeight: '600',
-    letterSpacing: 0.3,
+    fontSize:      FontSize.microLabel,
+    fontWeight:    '600',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
   },
 })

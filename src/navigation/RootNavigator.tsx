@@ -1,8 +1,16 @@
 import React from 'react'
-import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native'
+import {
+  NavigationContainer,
+  createNavigationContainerRef,
+} from '@react-navigation/native'
 import { createNativeStackNavigator } from '@react-navigation/native-stack'
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs'
-import { Text } from 'react-native'
+import type { BottomTabBarProps } from '@react-navigation/bottom-tabs'
+import {
+  View, Text, TouchableOpacity, StyleSheet,
+} from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import Ionicons from 'react-native-vector-icons/Ionicons'
 import { useAuth } from '../hooks/useAuth'
 import { QRScanScreen } from '../screens/Auth/QRScanScreen'
 import { RequestsListScreen } from '../screens/Requests/RequestsListScreen'
@@ -12,11 +20,11 @@ import { SessionDetailScreen } from '../screens/Sessions/SessionDetailScreen'
 import { PromptComposeScreen } from '../screens/Sessions/PromptComposeScreen'
 import { FileBrowserScreen } from '../screens/Sessions/FileBrowserScreen'
 import { MachinesScreen } from '../screens/Machines/MachinesScreen'
-import { HistoryScreen } from '../screens/History/HistoryScreen'
+import { TerminalScreen } from '../screens/Terminal/TerminalScreen'
 import { usePendingRequests } from '../hooks/useRequests'
 import { useSessions } from '../hooks/useSessions'
 import { usePushNotifications } from '../hooks/usePushNotifications'
-import { Colors } from '../constants/colors'
+import { Colors, Radius, Shadow, FontFamily, FontSize } from '../constants/colors'
 import type {
   RootStackParamList,
   TabParamList,
@@ -32,10 +40,104 @@ const RequestsStack = createNativeStackNavigator<RequestsStackParamList>()
 const SessionsStack = createNativeStackNavigator<SessionsStackParamList>()
 
 const HEADER_OPTS = {
-  headerStyle:      { backgroundColor: Colors.bgPrimary },
-  headerTintColor:  Colors.primary,
-  headerTitleStyle: { color: Colors.textPrimary, fontWeight: '600' as const },
+  headerStyle:      { backgroundColor: Colors.cream },
+  headerTintColor:  Colors.accentDeep,
+  headerTitleStyle: { color: Colors.textPrimary, fontSize: FontSize.label, fontWeight: '600' as const },
   headerBackTitle:  'Back',
+}
+
+// ── Tab metadata ──────────────────────────────────────────────────────────────
+const TAB_META: Record<string, {
+  label:        string
+  iconActive:   string
+  iconInactive: string
+}> = {
+  RequestsTab: { label: 'Requests', iconActive: 'notifications',  iconInactive: 'notifications-outline' },
+  SessionsTab: { label: 'Sessions', iconActive: 'flash',          iconInactive: 'flash-outline'         },
+  MachinesTab: { label: 'Machines', iconActive: 'server',         iconInactive: 'server-outline'        },
+  TerminalTab: { label: 'Terminal', iconActive: 'terminal',       iconInactive: 'terminal-outline'      },
+}
+
+// ── Single tab button ─────────────────────────────────────────────────────────
+function TabButton({
+  routeName, isFocused, badge, onPress,
+}: {
+  routeName: string
+  isFocused: boolean
+  badge:     number
+  onPress:   () => void
+}) {
+  const meta = TAB_META[routeName] ?? {
+    label: routeName, iconActive: 'ellipse', iconInactive: 'ellipse-outline',
+  }
+
+  return (
+    <TouchableOpacity
+      style={styles.tabBtn}
+      onPress={onPress}
+      activeOpacity={0.75}
+    >
+      <View style={[styles.tabChip, isFocused && styles.tabChipActive]}>
+        <Ionicons
+          name={isFocused ? meta.iconActive : meta.iconInactive}
+          size={26}
+          color={isFocused ? Colors.tabActive : Colors.tabInactive}
+        />
+      </View>
+
+      {badge > 0 && (
+        <View style={[
+          styles.badge,
+          { backgroundColor: routeName === 'SessionsTab' ? Colors.successDark : Colors.danger },
+        ]}>
+          <Text style={styles.badgeText}>{badge > 99 ? '99+' : badge}</Text>
+        </View>
+      )}
+    </TouchableOpacity>
+  )
+}
+
+// ── Floating glass pill tab bar ───────────────────────────────────────────────
+type FloatingTabBarProps = BottomTabBarProps & {
+  badges: Record<string, number>
+}
+
+function FloatingTabBar({ state, navigation, badges }: FloatingTabBarProps) {
+  const insets = useSafeAreaInsets()
+
+  return (
+    <View
+      style={[styles.tabBarWrap, { bottom: insets.bottom + 16 }]}
+      pointerEvents="box-none"
+    >
+      <View style={styles.pill}>
+        {state.routes.map((route, index) => {
+          const isFocused = state.index === index
+
+          const onPress = () => {
+            const event = navigation.emit({
+              type:              'tabPress',
+              target:            route.key,
+              canPreventDefault: true,
+            })
+            if (!isFocused && !event.defaultPrevented) {
+              navigation.navigate(route.name)
+            }
+          }
+
+          return (
+            <TabButton
+              key={route.key}
+              routeName={route.name}
+              isFocused={isFocused}
+              badge={badges[route.name] ?? 0}
+              onPress={onPress}
+            />
+          )
+        })}
+      </View>
+    </View>
+  )
 }
 
 // ── Requests stack ────────────────────────────────────────────────────────────
@@ -50,7 +152,7 @@ function RequestsNavigator() {
       <RequestsStack.Screen
         name="RequestDetail"
         component={RequestDetailScreen}
-        options={{ title: 'Review request' }}
+        options={{ headerShown: false }}
       />
     </RequestsStack.Navigator>
   )
@@ -68,121 +170,60 @@ function SessionsNavigator() {
       <SessionsStack.Screen
         name="SessionDetail"
         component={SessionDetailScreen}
-        options={({ route }) => ({
-          title: route.params.cwd?.split('/').pop() ?? route.params.machineLabel,
-        })}
+        options={{ headerShown: false }}
       />
       <SessionsStack.Screen
         name="RequestDetail"
         component={RequestDetailScreen}
-        options={{ title: 'Review request' }}
+        options={{ headerShown: false }}
       />
       <SessionsStack.Screen
         name="FileBrowser"
         component={FileBrowserScreen}
-        options={({ route }) => ({ title: `Files · ${route.params.machineLabel}` })}
+        options={({ route }) => ({ title: route.params.machineLabel })}
       />
       <SessionsStack.Screen
         name="PromptCompose"
         component={PromptComposeScreen}
-        options={{
-          title:        'Send prompt',
-          presentation: 'modal',
-          headerShown:  false,
-        }}
+        options={{ headerShown: false, presentation: 'modal' }}
       />
     </SessionsStack.Navigator>
   )
 }
 
-// ── Tab bar icon ──────────────────────────────────────────────────────────────
-function TabIcon({ label, focused }: { label: string; focused: boolean }) {
-  const icons: Record<string, string> = {
-    Requests: '⊡',
-    Sessions: '⚡',
-    Machines: '◈',
-    History:  '◷',
-  }
-  return (
-    <Text style={{ fontSize: 20, color: focused ? Colors.tabActive : Colors.tabInactive }}>
-      {icons[label] ?? '○'}
-    </Text>
-  )
-}
-
-// ── Bottom tabs ───────────────────────────────────────────────────────────────
+// ── App navigator ─────────────────────────────────────────────────────────────
 function AppNavigator() {
   const { data: pending  = [] } = usePendingRequests()
   const { data: sessions = [] } = useSessions()
   usePushNotifications()
 
+  const pendingCount   = pending.length
   const activeSessions = sessions.filter(s => s.status === 'active').length
 
   return (
     <Tab.Navigator
-      screenOptions={({ route }) => ({
-        headerShown:             false,
-        tabBarActiveTintColor:   Colors.tabActive,
-        tabBarInactiveTintColor: Colors.tabInactive,
-        tabBarStyle: {
-          backgroundColor: Colors.tabBg,
-          borderTopColor:  Colors.border,
-          borderTopWidth:  0.5,
-          paddingBottom:   4,
-          height:          56,
-        },
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '500' as const },
-        tabBarIcon: ({ focused }) => (
-          <TabIcon label={route.name.replace('Tab', '')} focused={focused} />
-        ),
-      })}
+      screenOptions={{ headerShown: false }}
+      tabBar={(props) => (
+        <FloatingTabBar
+          {...props}
+          badges={{
+            RequestsTab: pendingCount,
+            SessionsTab: activeSessions,
+          }}
+        />
+      )}
     >
-      <Tab.Screen
-        name="RequestsTab"
-        component={RequestsNavigator}
-        options={{
-          tabBarLabel: 'Requests',
-          tabBarBadge: pending.length > 0 ? pending.length : undefined,
-          tabBarBadgeStyle: {
-            backgroundColor: Colors.primary,
-            color:           Colors.white,
-            fontSize:        10,
-            fontWeight:      '700',
-          },
-        }}
-      />
-      <Tab.Screen
-        name="SessionsTab"
-        component={SessionsNavigator}
-        options={{
-          tabBarLabel: 'Sessions',
-          tabBarBadge: activeSessions > 0 ? activeSessions : undefined,
-          tabBarBadgeStyle: {
-            backgroundColor: Colors.success,
-            color:           Colors.white,
-            fontSize:        10,
-            fontWeight:      '700',
-          },
-        }}
-      />
-      <Tab.Screen
-        name="MachinesTab"
-        component={MachinesScreen}
-        options={{ tabBarLabel: 'Machines' }}
-      />
-      <Tab.Screen
-        name="HistoryTab"
-        component={HistoryScreen}
-        options={{ tabBarLabel: 'History' }}
-      />
+      <Tab.Screen name="RequestsTab" component={RequestsNavigator} />
+      <Tab.Screen name="SessionsTab" component={SessionsNavigator} />
+      <Tab.Screen name="MachinesTab"  component={MachinesScreen} />
+      <Tab.Screen name="TerminalTab" component={TerminalScreen} />
     </Tab.Navigator>
   )
 }
 
-// ── Root navigator — auth guard ───────────────────────────────────────────────
+// ── Root — auth guard ─────────────────────────────────────────────────────────
 export function RootNavigator() {
   const { credentials, loading } = useAuth()
-
   if (loading) return null
 
   return (
@@ -196,3 +237,59 @@ export function RootNavigator() {
     </NavigationContainer>
   )
 }
+
+// ── Styles ────────────────────────────────────────────────────────────────────
+const styles = StyleSheet.create({
+  tabBarWrap: {
+    position: 'absolute',
+    left:     20,
+    right:    20,
+  },
+  pill: {
+    flexDirection:     'row',
+    height:            76,
+    borderRadius:      Radius.full,
+    backgroundColor:   Colors.surfaceGlassStrong,
+    borderWidth:       2.5,
+    borderColor:       Colors.borderHairline,
+    borderTopColor:    Colors.borderGlass,
+    alignItems:        'center',
+    paddingHorizontal: 8,
+    ...Shadow.float,
+  },
+  tabBtn: {
+    flex:           1,
+    alignItems:     'center',
+    justifyContent: 'center',
+    height:         '100%',
+  },
+  tabChip: {
+    width:          52,
+    height:         52,
+    borderRadius:   25,
+    overflow:       'hidden',
+    alignItems:     'center',
+    justifyContent: 'center',
+  },
+  tabChipActive: {
+    backgroundColor: Colors.accentLight,
+  },
+  badge: {
+    position:          'absolute',
+    top:               8,
+    right:             '10%',
+    minWidth:          16,
+    height:            16,
+    borderRadius:      Radius.full,
+    alignItems:        'center',
+    justifyContent:    'center',
+    paddingHorizontal: 3,
+    borderWidth:       2,
+    borderColor:       Colors.cream,
+  },
+  badgeText: {
+    fontSize:   9,
+    color:      Colors.white,
+    fontWeight: '700',
+  },
+})

@@ -1,100 +1,131 @@
-import React from 'react'
+import React, { useRef, useEffect } from 'react'
 import {
   View, Text, FlatList, StyleSheet,
-  RefreshControl, TouchableOpacity, StatusBar,
+  RefreshControl, TouchableOpacity, StatusBar, Animated,
 } from 'react-native'
 import { useNavigation } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { formatDistanceToNow } from 'date-fns'
+import Ionicons from 'react-native-vector-icons/Ionicons'
 import { useSessions } from '../../hooks/useSessions'
-import { Colors, Spacing, Radius, FontSize, Shadow } from '../../constants/colors'
+import { GradientBackground } from '../../components/GradientBackground'
+import { Colors, Spacing, Radius, FontSize, FontFamily, Shadow, TAB_BOTTOM_INSET } from '../../constants/colors'
 import type { SessionsStackParamList, AgentSession } from '../../types'
 
 type Nav = NativeStackNavigationProp<SessionsStackParamList>
 
-const STATUS_DOT: Record<string, string> = {
+const STATUS_COLOR: Record<string, string> = {
   active:   Colors.success,
   idle:     Colors.warning,
   finished: Colors.textTertiary,
 }
 
-const STATUS_LABEL: Record<string, string> = {
-  active:   'Active',
-  idle:     'Idle',
-  finished: 'Finished',
+// ── Pulsing dot ───────────────────────────────────────────────────────────────
+function PulseDot({ color, active }: { color: string; active: boolean }) {
+  const pulse = useRef(new Animated.Value(1)).current
+
+  useEffect(() => {
+    if (!active) return
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1.7, duration: 900, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 1,   duration: 900, useNativeDriver: true }),
+      ])
+    )
+    loop.start()
+    return () => loop.stop()
+  }, [active])
+
+  return (
+    <View style={styles.dotWrap}>
+      {active && (
+        <Animated.View style={[
+          styles.dotPulse,
+          { backgroundColor: color, transform: [{ scale: pulse }] },
+        ]} />
+      )}
+      <View style={[styles.dot, { backgroundColor: color }]} />
+    </View>
+  )
 }
 
+// ── Session card ──────────────────────────────────────────────────────────────
 function SessionCard({ session, onDetail, onPrompt }: {
   session:  AgentSession
   onDetail: () => void
   onPrompt: () => void
 }) {
-  const dotColor    = STATUS_DOT[session.status] ?? Colors.textTertiary
-  const statusLabel = STATUS_LABEL[session.status] ?? session.status
-  const lastSeen    = session.last_activity_at
-    ? formatDistanceToNow(new Date(session.last_activity_at), { addSuffix: true })
-    : 'Never'
+  const dotColor    = STATUS_COLOR[session.status] ?? Colors.textTertiary
+  const statusLabel = session.status === 'active' ? 'Active'
+                    : session.status === 'idle'   ? 'Idle' : 'Finished'
   const canPrompt   = session.pending_count === 0 && session.status !== 'finished'
-  const cwd         = session.cwd ?? '~'
+  const isActive    = session.status === 'active'
 
   return (
     <View style={styles.card}>
-      {/* Left accent */}
-      <View style={[styles.accent, { backgroundColor: dotColor }]} />
-
-      <View style={styles.cardBody}>
-        {/* Machine + status */}
-        <View style={styles.topRow}>
-          <View style={styles.titleRow}>
-            <View style={[styles.dot, { backgroundColor: dotColor }]} />
-            <Text style={styles.machineLabel} numberOfLines={1}>
-              {session.machine_label}
-            </Text>
-          </View>
-          <View style={[styles.statusBadge, { borderColor: dotColor }]}>
-            <Text style={[styles.statusText, { color: dotColor }]}>
-              {statusLabel}
-            </Text>
-          </View>
+      {/* Top row: status pill · tool icon */}
+      <View style={styles.cardTop}>
+        <View style={styles.statusPill}>
+          <PulseDot color={dotColor} active={isActive} />
+          <Text style={[styles.statusText, { color: dotColor }]}>{statusLabel}</Text>
         </View>
+        <Ionicons name="terminal-outline" size={18} color={Colors.accentDeep}/>
+      </View>
 
-        {/* CWD */}
-        <Text style={styles.cwd} numberOfLines={1}>{cwd}</Text>
+      {/* Title */}
+      <Text style={styles.cardTitle} numberOfLines={2}>
+        {session.machine_label}
+      </Text>
 
-        {/* Pending count + last activity */}
-        <Text style={styles.meta}>
-          {session.pending_count > 0
-            ? `${session.pending_count} pending · `
-            : ''}
-          {lastSeen}
-        </Text>
+      {/* Path row */}
+      <View style={styles.pathRow}>
+        <Ionicons name="folder-outline" size={14} color={Colors.textTertiary} />
+        <Text style={styles.pathText} numberOfLines={1}>{session.cwd ?? '~'}</Text>
+      </View>
 
-        {/* Actions */}
-        <View style={styles.actions}>
-          <TouchableOpacity
-            style={[styles.promptBtn, !canPrompt && styles.promptBtnDisabled]}
-            disabled={!canPrompt}
-            onPress={onPrompt}
-            activeOpacity={0.7}
-          >
-            <Text style={[styles.promptBtnText, !canPrompt && styles.promptBtnTextDisabled]}>
-              {session.pending_count > 0 ? 'Approvals pending…' : 'Prompt'}
-            </Text>
-          </TouchableOpacity>
+      {/* Actions */}
+      <View style={styles.actions}>
+        <TouchableOpacity
+          style={[styles.promptBtn, !canPrompt && styles.promptBtnDisabled]}
+          disabled={!canPrompt}
+          onPress={onPrompt}
+          activeOpacity={0.8}
+        >
+          <Ionicons
+            name="chatbubble-outline"
+            size={15}
+            color={canPrompt ? '#fff' : Colors.textTertiary}
+          />
+          <Text style={[styles.promptBtnText, !canPrompt && styles.promptBtnTextDisabled]}>
+            {session.pending_count > 0 ? 'Approvals pending' : 'Prompt'}
+          </Text>
+        </TouchableOpacity>
 
-          <TouchableOpacity style={styles.detailBtn} onPress={onDetail} activeOpacity={0.7}>
-            <Text style={styles.detailBtnText}>Detail →</Text>
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity 
+          style={[styles.detailBtn, 
+          !canPrompt && styles.promptBtnDisabled]} 
+          onPress={onDetail} activeOpacity={0.7} 
+          disabled={!canPrompt}
+        >
+          
+          <Text style={styles.detailBtnText}>Detail  </Text>
+          <Ionicons
+            name="arrow-forward-outline"
+            size={15}
+            color={canPrompt ? '#fff' : Colors.textTertiary}
+          />
+        </TouchableOpacity>
       </View>
     </View>
   )
 }
 
+// ── Screen ────────────────────────────────────────────────────────────────────
 export function SessionsScreen() {
-  const navigation = useNavigation<Nav>()
+  const navigation  = useNavigation<Nav>()
+  const insets      = useSafeAreaInsets()
   const { data: sessions = [], isLoading, refetch, isRefetching } = useSessions()
-
   const activeCount = sessions.filter(s => s.status === 'active').length
 
   function renderItem({ item }: { item: AgentSession }) {
@@ -107,27 +138,24 @@ export function SessionsScreen() {
           cwd:             item.cwd,
           machineIsOnline: item.machine_is_online,
         })}
-        onPrompt={() => navigation.navigate('PromptCompose', {
-          sessionId: item.session_id,
-        })}
+        onPrompt={() => navigation.navigate('PromptCompose', { sessionId: item.session_id })}
       />
     )
   }
 
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor={Colors.bgPrimary} />
+    <GradientBackground>
+      <StatusBar barStyle="dark-content" translucent backgroundColor="transparent" />
 
-      <View style={styles.header}>
-        <View style={styles.headerLeft}>
+      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
+        <View>
+          <Text style={styles.appName}>Vibe Remote</Text>
           <Text style={styles.title}>Sessions</Text>
-          {activeCount > 0 && (
-            <View style={styles.badge}>
-              <Text style={styles.badgeText}>{activeCount} active</Text>
-            </View>
-          )}
         </View>
-        <Text style={styles.liveIndicator}>↻ 10s</Text>
+        <View style={styles.liveIndicator}>
+          <View style={styles.liveDot} />
+          <Text style={styles.liveText}>live</Text>
+        </View>
       </View>
 
       <FlatList
@@ -141,198 +169,234 @@ export function SessionsScreen() {
           <RefreshControl
             refreshing={isRefetching}
             onRefresh={refetch}
-            tintColor={Colors.primary}
-            colors={[Colors.primary]}
+            tintColor={Colors.accent}
+            colors={[Colors.accent]}
           />
         }
         ListEmptyComponent={
           isLoading ? null : (
             <View style={styles.empty}>
-              <Text style={styles.emptyIcon}>⚡</Text>
-              <Text style={styles.emptyTitle}>No sessions</Text>
+              <View style={styles.emptyIconWrap}>
+                <Ionicons name="flash-outline" size={48} color={Colors.accentDeep} />
+              </View>
+              <Text style={styles.emptyTitle}>{'No sessions\nrunning.'}</Text>
               <Text style={styles.emptySub}>
-                Sessions appear here when{' '}
+                Sessions appear once{' '}
                 <Text style={styles.code}>hook.js</Text>
-                {' '}intercepts a tool call from Claude Code.
+                {' '}intercepts a tool call.
               </Text>
             </View>
           )
         }
       />
-    </View>
+    </GradientBackground>
   )
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex:            1,
-    backgroundColor: Colors.bgSecondary,
-  },
   header: {
     flexDirection:     'row',
     alignItems:        'center',
     justifyContent:    'space-between',
-    paddingHorizontal: Spacing.lg,
-    paddingTop:        Spacing.lg,
-    paddingBottom:     Spacing.md,
-    backgroundColor:   Colors.bgPrimary,
-    borderBottomWidth: 0.5,
-    borderColor:       Colors.border,
+    paddingHorizontal: Spacing.px20,
+    paddingBottom:     Spacing.px16,
   },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems:    'center',
-    gap:           Spacing.sm,
+  appName: {
+    fontSize:   28,
+    fontFamily: FontFamily.serifItalic,
+    color:      Colors.textPrimary,
+    lineHeight: 32,
   },
   title: {
-    fontSize:   FontSize.xl,
-    fontWeight: '700',
-    color:      Colors.textPrimary,
-  },
-  badge: {
-    backgroundColor:   Colors.primaryLight,
-    borderRadius:      Radius.full,
-    paddingHorizontal: 8,
-    paddingVertical:   3,
-  },
-  badgeText: {
-    color:      Colors.primary,
-    fontSize:   FontSize.xs,
-    fontWeight: '600',
+    fontSize:      FontSize.cardTitle,
+    fontFamily:    FontFamily.loraItalic,
+    fontWeight:    '500',
+    color:         Colors.textTertiary,
+    letterSpacing: 0.3,
   },
   liveIndicator: {
-    fontSize:   FontSize.xs,
-    color:      Colors.success,
-    fontWeight: '600',
+    flexDirection:     'row',
+    alignItems:        'center',
+    gap:               4,
+    backgroundColor:   Colors.surfaceGlassStrong,
+    borderRadius:      Radius.full,
+    paddingHorizontal: Spacing.px8,
+    paddingVertical:   4,
+    borderWidth:       1,
+    borderColor:       Colors.borderHairline,
+  },
+  liveDot: {
+    width:           8,
+    height:          8,
+    borderRadius:    Radius.full,
+    backgroundColor: Colors.accent,
+  },
+  liveText: {
+    fontSize:  FontSize.label,
+    color:     Colors.textSecondary,
+    fontStyle: 'italic',
   },
   listContent: {
-    padding:     Spacing.lg,
-    gap:         Spacing.sm,
-    paddingBottom: Spacing.xxxl,
-  },
-  emptyContainer: {
-    flex:           1,
-    justifyContent: 'center',
-  },
-  empty: {
-    alignItems:        'center',
-    paddingHorizontal: Spacing.xxxl,
-    gap:               Spacing.md,
-  },
-  emptyIcon: {
-    fontSize:    40,
-    marginBottom: Spacing.sm,
-  },
-  emptyTitle: {
-    fontSize:   FontSize.lg,
-    fontWeight: '600',
-    color:      Colors.textPrimary,
-  },
-  emptySub: {
-    fontSize:   FontSize.sm,
-    color:      Colors.textSecondary,
-    textAlign:  'center',
-    lineHeight: 20,
-  },
-  code: {
-    fontFamily: 'monospace',
-    color:      Colors.primary,
+    paddingHorizontal: Spacing.px20,
+    paddingTop:        Spacing.px4,
+    paddingBottom:     TAB_BOTTOM_INSET,
+    gap:               Spacing.px12,
   },
 
-  // Session card
+  // Card
   card: {
-    flexDirection:   'row',
-    backgroundColor: Colors.cardBg,
-    borderRadius:    Radius.lg,
-    borderWidth:     0.5,
-    borderColor:     Colors.border,
-    overflow:        'hidden',
-    ...Shadow.card,
+    backgroundColor: Colors.bgPrimary,
+    borderRadius:    Radius.md,
+    padding:         Spacing.px20,
+    gap:             Spacing.px16,
+    shadowColor:     '#A08060',
+    shadowOffset:    { width: 0, height: 6 },
+    shadowOpacity:   0.13,
+    shadowRadius:    20,
+    elevation:       5,
   },
-  accent: {
-    width: 4,
-  },
-  cardBody: {
-    flex:    1,
-    padding: Spacing.md,
-    gap:     Spacing.xs,
-  },
-  topRow: {
+  cardTop: {
     flexDirection:  'row',
     alignItems:     'center',
     justifyContent: 'space-between',
   },
-  titleRow: {
-    flexDirection: 'row',
-    alignItems:    'center',
-    gap:           Spacing.xs,
-    flex:          1,
+  dotWrap: {
+    width:          8,
+    height:         8,
+    alignItems:     'center',
+    justifyContent: 'center',
   },
-  dot: {
+  dotPulse: {
+    position:     'absolute',
     width:        8,
     height:       8,
     borderRadius: Radius.full,
-    flexShrink:   0,
+    opacity:      0.30,
   },
-  machineLabel: {
-    fontSize:   FontSize.md,
-    fontWeight: '600',
-    color:      Colors.textPrimary,
-    flex:       1,
+  dot: {
+    width:        7,
+    height:       7,
+    borderRadius: Radius.full,
   },
-  statusBadge: {
-    paddingHorizontal: 7,
-    paddingVertical:   2,
-    borderRadius:      Radius.sm,
-    borderWidth:       1,
+  statusPill: {
+    flexDirection:     'row',
+    alignItems:        'center',
+    gap:               6,
+    backgroundColor:   'rgba(0,0,0,0.06)',
+    borderRadius:      Radius.full,
+    paddingHorizontal: Spacing.px12,
+    paddingVertical:   6,
   },
   statusText: {
-    fontSize:   FontSize.xs,
-    fontWeight: '600',
-  },
-  cwd: {
-    fontFamily: 'monospace',
-    fontSize:   FontSize.sm,
+    fontSize:   FontSize.label,
+    fontWeight: '500',
     color:      Colors.textSecondary,
   },
-  meta: {
-    fontSize:  FontSize.xs,
-    color:     Colors.textTertiary,
+  cardTitle: {
+    fontSize:      20,
+    fontFamily:    FontFamily.serif,
+    color:         Colors.textPrimary,
+    letterSpacing: -0.3,
+    lineHeight:    26,
+  },
+  pathRow: {
+    flexDirection:     'row',
+    alignItems:        'center',
+    gap:               Spacing.px8,
+    backgroundColor:   'rgba(0,0,0,0.04)',
+    borderRadius:      Radius.sm,
+    paddingHorizontal: Spacing.px12,
+    paddingVertical:   Spacing.px8,
+  },
+  pathText: {
+    fontFamily: FontFamily.mono,
+    fontSize:   FontSize.monoSmall,
+    color:      Colors.textSecondary,
+    flex:       1,
   },
   actions: {
     flexDirection: 'row',
-    gap:           Spacing.sm,
-    marginTop:     Spacing.xs,
+    alignItems:    'center',
+    gap:           Spacing.px12,
+    marginTop:     Spacing.px4,
   },
   promptBtn: {
-    flex:              1,
-    paddingVertical:   Spacing.sm,
-    borderRadius:      Radius.sm,
-    backgroundColor:   Colors.primary,
-    alignItems:        'center',
+    flex:           1,
+    flexDirection:  'row',
+    alignItems:     'center',
+    justifyContent: 'center',
+    gap:            Spacing.px8,
+    height:         48,
+    borderRadius:   Radius.full,
+    backgroundColor: Colors.accentDeep,
+    shadowColor:    Colors.accentDeep,
+    shadowOffset:   { width: 0, height: 4 },
+    shadowOpacity:  0.35,
+    shadowRadius:   12,
+    elevation:      4,
   },
   promptBtnDisabled: {
-    backgroundColor: Colors.bgTertiary,
+    backgroundColor: 'rgba(0,0,0,0.06)',
+    shadowOpacity:   0,
+    elevation:       0,
   },
   promptBtnText: {
-    fontSize:   FontSize.sm,
+    fontSize:   FontSize.label,
     fontWeight: '600',
-    color:      Colors.white,
+    color:      '#FFFFFF',
   },
   promptBtnTextDisabled: {
     color: Colors.textTertiary,
   },
   detailBtn: {
-    paddingVertical:   Spacing.sm,
-    paddingHorizontal: Spacing.md,
-    borderRadius:      Radius.sm,
-    borderWidth:       0.5,
-    borderColor:       Colors.border,
-    alignItems:        'center',
+    flex:           1,
+    flexDirection:  'row',
+    alignItems:     'center',
+    justifyContent: 'center',
+    height:         48,
+    borderRadius:   Radius.full,
+    borderColor:    'rgba(0,0,0,0.12)',
   },
   detailBtnText: {
-    fontSize:   FontSize.sm,
-    fontWeight: '500',
+    fontSize:   FontSize.label,
+    fontWeight: '600',
     color:      Colors.textSecondary,
+  },
+
+  // Empty
+  emptyContainer: { flexGrow: 1, justifyContent: 'center', alignItems: 'center' },
+  empty: {
+    alignItems:        'center',
+    paddingHorizontal: Spacing.px32,
+    gap:               Spacing.px12,
+  },
+  emptyIconWrap: {
+    width:           80,
+    height:          80,
+    borderRadius:    Radius.full,
+    backgroundColor: Colors.accentLight,
+    alignItems:      'center',
+    justifyContent:  'center',
+    marginBottom:    Spacing.px8,
+  },
+  emptyTitle: {
+    fontSize:      FontSize.displayM,
+    fontWeight:    '500',
+    fontFamily:    'Fraunces-SemiBold',
+    color:         Colors.textPrimary,
+    textAlign:     'center',
+    letterSpacing: -0.4,
+    lineHeight:    FontSize.displayM * 1.1,
+  },
+  emptySub: {
+    fontSize:   FontSize.body,
+    color:      Colors.textSecondary,
+    textAlign:  'center',
+    lineHeight: 22,
+    maxWidth:   280,
+  },
+  code: {
+    fontSize: FontSize.monoSmall,
+    color:    Colors.accent,
   },
 })

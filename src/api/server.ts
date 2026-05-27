@@ -1,5 +1,5 @@
 import { createMMKV } from 'react-native-mmkv'
-import type { Machine, PendingRequest, AgentSession, MobileCommand, FsNode } from '../types'
+import type { Machine, PendingRequest, AgentSession, MobileCommand, FsNode, TerminalEvent } from '../types'
 
 const storage = createMMKV({ id: 'machine-credentials' })
 
@@ -127,6 +127,14 @@ export function fetchPrompts(): Promise<MobileCommand[]> {
 
 export function cancelPrompt(id: string): Promise<void> {
   return request<void>(`/mobile/prompt/${id}`, { method: 'DELETE' })
+}
+
+// ── Terminal events ────────────────────────────────────────────────────────────
+
+export function fetchTerminalEvents(sessionId?: string, limit = 60): Promise<{ events: TerminalEvent[] }> {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (sessionId) params.set('session_id', sessionId)
+  return request<{ events: TerminalEvent[] }>(`/mobile/terminal?${params}`)
 }
 
 // ── File tree ──────────────────────────────────────────────────────────────────

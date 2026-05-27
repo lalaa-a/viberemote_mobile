@@ -1,117 +1,141 @@
-import React from 'react'
+import React, { useRef } from 'react'
 import {
-  View, Text, TouchableOpacity, StyleSheet
+  View, Text, TouchableOpacity, StyleSheet,
 } from 'react-native'
+import { Swipeable } from 'react-native-gesture-handler'
 import { formatDistanceToNow } from 'date-fns'
-import { Colors, Spacing, Radius, FontSize, Shadow } from '../constants/colors'
+import Ionicons from 'react-native-vector-icons/Ionicons'
+import { Colors, Spacing, Radius, FontSize, FontFamily, Shadow } from '../constants/colors'
 import { RiskBadge } from './RiskBadge'
 import type { PendingRequest } from '../types'
 
 interface Props {
-  request: PendingRequest
-  onPress: () => void
+  request:    PendingRequest
+  onPress:    () => void
+  onApprove?: () => void
+  onDeny?:    () => void
 }
 
-// Dot color per tool type
-const TOOL_DOT: Record<string, string> = {
-  Bash:      '#378ADD',
-  Write:     '#639922',
-  Edit:      '#534AB7',
-  MultiEdit: '#BA7517',
-}
-
-export function RequestCard({ request, onPress }: Props) {
-  const dotColor = TOOL_DOT[request.tool_name] ?? Colors.textTertiary
-  const timeAgo  = formatDistanceToNow(
-    new Date(request.created_at),
-    { addSuffix: true }
-  )
-
+export function RequestCard({ request, onPress, onApprove, onDeny }: Props) {
+  const swipeRef     = useRef<Swipeable>(null)
+  const toolCfg      = Colors.tool[request.tool_name as keyof typeof Colors.tool]
+                       ?? Colors.tool.unknown
+  const riskCfg      = Colors.risk[request.risk_level] ?? Colors.risk.low
+  const timeAgo      = formatDistanceToNow(new Date(request.created_at), { addSuffix: true })
   const isCliPending = request.status === 'cli_pending'
+  const canDecide    = request.status === 'pending'
+
+  function handleApprove() {
+    swipeRef.current?.close()
+    onApprove?.()
+  }
+
+  function handleDeny() {
+    swipeRef.current?.close()
+    onDeny?.()
+  }
+
+  function renderLeftActions() {
+    return (
+      <TouchableOpacity style={styles.approveAction} onPress={handleApprove} activeOpacity={0.85}>
+        <Ionicons name="checkmark" size={22} color={Colors.white} />
+        <Text style={styles.actionLabel}>Approve</Text>
+      </TouchableOpacity>
+    )
+  }
+
+  function renderRightActions() {
+    return (
+      <TouchableOpacity style={styles.denyAction} onPress={handleDeny} activeOpacity={0.85}>
+        <Ionicons name="close" size={22} color={Colors.white} />
+        <Text style={styles.actionLabel}>Deny</Text>
+      </TouchableOpacity>
+    )
+  }
 
   return (
-    <TouchableOpacity
-      style={styles.card}
-      onPress={onPress}
-      activeOpacity={0.7}
+    <Swipeable
+      ref={swipeRef}
+      renderLeftActions={canDecide && onApprove ? renderLeftActions : undefined}
+      renderRightActions={canDecide && onDeny   ? renderRightActions : undefined}
+      friction={2}
+      overshootLeft={false}
+      overshootRight={false}
+      containerStyle={styles.swipeContainer}
     >
-      {/* Left accent bar by risk */}
-      <View style={[
-        styles.accent,
-        { backgroundColor: Colors.risk[request.risk_level]?.border ?? Colors.border }
-      ]} />
+      <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.7}>
+        {/* Risk whisper gradient at top */}
+        <View style={[styles.whisper, { backgroundColor: riskCfg.whisper }]} />
 
-      <View style={styles.body}>
-        {/* Top row */}
-        <View style={styles.topRow}>
-          <View style={styles.toolRow}>
-            <View style={[styles.dot, { backgroundColor: dotColor }]} />
-            <Text style={styles.toolName}>{request.tool_name}</Text>
-            {isCliPending && (
-              <View style={styles.cliTag}>
-                <Text style={styles.cliTagText}>CLI</Text>
-              </View>
-            )}
+        <View style={styles.body}>
+          {/* Top row — tool badge + risk badge */}
+          <View style={styles.topRow}>
+            <View style={styles.toolRow}>
+              <View style={[styles.toolDot, { backgroundColor: toolCfg.dot }]} />
+              <Text style={styles.toolName}>{request.tool_name}</Text>
+              {isCliPending && (
+                <View style={styles.cliPill}>
+                  <Text style={styles.cliText}>CLI</Text>
+                </View>
+              )}
+            </View>
+            <RiskBadge level={request.risk_level} />
           </View>
-          <RiskBadge level={request.risk_level} />
-        </View>
 
-        {/* Summary */}
-        <Text style={styles.summary} numberOfLines={2}>
-          {request.summary}
-        </Text>
+          {/* Summary */}
+          <Text style={styles.summeryPathText} numberOfLines={3}>{request.summary}</Text>
 
-        {/* Files list (up to 2) */}
-        {request.files_affected?.length > 0 && (
-          <View style={styles.filesRow}>
-            {request.files_affected.slice(0, 2).map((f, i) => (
-              <Text key={i} style={styles.file} numberOfLines={1}>
-                {f.split('/').pop()}
+          {/* Divider */}
+          <View style={styles.divider} />
+
+          {/* Meta row */}
+          <View style={styles.metaRow}>
+            <View style={styles.machineRow}>
+              <View style={[
+                styles.machineDot,
+                { backgroundColor: request.machines?.is_online ? Colors.success : Colors.textTertiary },
+              ]} />
+              <Text style={styles.machineText}>
+                {request.machines?.label ?? 'Unknown'}
               </Text>
-            ))}
-            {request.files_affected.length > 2 && (
-              <Text style={styles.moreFiles}>
-                +{request.files_affected.length - 2} more
-              </Text>
-            )}
+              <Text style={styles.metaSep}>·</Text>
+              <Text style={styles.timeText}>{timeAgo}</Text>
+            </View>
           </View>
-        )}
-
-        {/* Bottom row */}
-        <View style={styles.bottomRow}>
-          <Text style={styles.machine}>
-            {request.machines?.label ?? 'Unknown machine'}
-          </Text>
-          <Text style={styles.time}>{timeAgo}</Text>
         </View>
-      </View>
-
-      {/* Arrow */}
-      <Text style={styles.arrow}>›</Text>
-    </TouchableOpacity>
+      </TouchableOpacity>
+    </Swipeable>
   )
 }
 
 const styles = StyleSheet.create({
-  card: {
-    flexDirection:   'row',
-    backgroundColor: Colors.cardBg,
-    marginHorizontal: Spacing.lg,
-    marginVertical:   Spacing.xs,
-    borderRadius:    Radius.lg,
-    borderWidth:     0.5,
-    borderColor:     Colors.border,
-    overflow:        'hidden',
-    ...Shadow.card,
+  swipeContainer: {
+    marginHorizontal: Spacing.px20,
+    marginVertical:   6,
   },
-  accent: {
-    width:           4,
-    alignSelf:       'stretch',
+  card: {
+    backgroundColor: Colors.bgPrimary,
+    borderRadius:    Radius.md,
+    borderWidth:     1,
+    borderColor:     Colors.borderHairline,
+    shadowColor:     '#A08060',
+    shadowOffset:    { width: 0, height: 5 },
+    shadowOpacity:   0.13,
+    shadowRadius:    20,
+    elevation:       5,
+    overflow:        'hidden',
+    
+  },
+  whisper: {
+    position: 'absolute',
+    top:      0,
+    left:     0,
+    right:    0,
+    height:   50,
   },
   body: {
-    flex:    1,
-    padding: Spacing.md,
-    gap:     Spacing.xs,
+    padding: Spacing.px20,
+    gap:     Spacing.px8,
   },
   topRow: {
     flexDirection:  'row',
@@ -121,72 +145,124 @@ const styles = StyleSheet.create({
   toolRow: {
     flexDirection: 'row',
     alignItems:    'center',
-    gap:           Spacing.xs,
+    gap:           Spacing.px8,
   },
-  dot: {
-    width:        7,
-    height:       7,
+  toolDot: {
+    width:        6,
+    height:       6,
     borderRadius: Radius.full,
   },
   toolName: {
-    fontSize:   FontSize.sm,
-    fontWeight: '600',
-    color:      Colors.textPrimary,
+    fontSize:  FontSize.label,
+    fontStyle: 'italic',
+    color:     Colors.textSecondary,
+    fontWeight:'500',
   },
-  cliTag: {
-    backgroundColor: Colors.bgTertiary,
-    paddingHorizontal: 5,
+  cliPill: {
+    backgroundColor:   Colors.surfaceGlassStrong,
+    paddingHorizontal: 6,
     paddingVertical:   1,
-    borderRadius:    Radius.sm,
+    borderRadius:      Radius.full,
+    borderWidth:       1,
+    borderColor:       Colors.borderHairline,
   },
-  cliTagText: {
-    fontSize:  FontSize.xs,
-    color:     Colors.textTertiary,
-    fontWeight:'600',
+  cliText: {
+    fontSize:      FontSize.microLabel,
+    color:         Colors.textTertiary,
+    fontWeight:    '600',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
   },
   summary: {
-    fontSize:   FontSize.sm,
+    fontSize:   FontSize.cardTitle,
+    color:      Colors.textPrimary,
+    lineHeight: FontSize.cardTitle * 1.3,
+    fontWeight: '500',
+  },
+  filesCol: {
+    gap: 4,
+  },
+  pathRow: {
+    flexDirection:     'row',
+    alignItems:        'center',
+    gap:               Spacing.px8,
+    backgroundColor:   'rgba(0,0,0,0.04)',
+    borderRadius:      Radius.sm,
+    paddingHorizontal: Spacing.px12,
+    paddingVertical:   Spacing.px8,
+  },
+  pathText: {
+    fontFamily: FontFamily.mono,
+    fontSize:   FontSize.monoSmall,
     color:      Colors.textSecondary,
-    lineHeight: 18,
+    flex:       1,
   },
-  filesRow: {
-    flexDirection: 'row',
-    flexWrap:      'wrap',
-    gap:           Spacing.xs,
+
+  summeryPathText: {
+    fontFamily: FontFamily.mono,
+    fontSize:   FontSize.body,
+    color:      Colors.textSecondary,
   },
-  file: {
-    fontSize:        FontSize.xs,
-    fontFamily:      'monospace',
-    color:           Colors.primary,
-    backgroundColor: Colors.primaryLight,
-    paddingHorizontal: 6,
-    paddingVertical:   2,
-    borderRadius:    Radius.sm,
-    maxWidth:        160,
-  },
+
   moreFiles: {
-    fontSize:  FontSize.xs,
-    color:     Colors.textTertiary,
-    alignSelf: 'center',
-  },
-  bottomRow: {
-    flexDirection:  'row',
-    justifyContent: 'space-between',
-    alignItems:     'center',
-    marginTop:      Spacing.xs,
-  },
-  machine: {
-    fontSize:  FontSize.xs,
+    fontSize:  FontSize.metadata,
     color:     Colors.textTertiary,
   },
-  time: {
-    fontSize:  FontSize.xs,
-    color:     Colors.textTertiary,
+  divider: {
+    height:          1,
+    backgroundColor: Colors.borderHairline,
+    marginVertical:  Spacing.px4,
   },
-  arrow: {
-    fontSize:   22,
-    color:      Colors.border,
-    alignSelf:  'center',
-    paddingRight: Spacing.sm,
+  metaRow: {
+    flexDirection: 'row',
+    alignItems:    'center',
+  },
+  machineRow: {
+    flexDirection: 'row',
+    alignItems:    'center',
+    gap:           5,
+  },
+  machineDot: {
+    width:        5,
+    height:       5,
+    borderRadius: Radius.full,
+  },
+  machineText: {
+    fontSize:  FontSize.metadata,
+    color:     Colors.textSecondary,
+    fontWeight:'500',
+  },
+  metaSep: {
+    fontSize: FontSize.metadata,
+    color:    Colors.textTertiary,
+  },
+  timeText: {
+    fontSize: FontSize.metadata,
+    color:    Colors.textTertiary,
+  },
+
+  // Swipe actions
+  approveAction: {
+    backgroundColor: Colors.successDark,
+    justifyContent:  'center',
+    alignItems:      'center',
+    paddingHorizontal: Spacing.px24,
+    gap:             4,
+    borderTopLeftRadius:    Radius.xl,
+    borderBottomLeftRadius: Radius.xl,
+  },
+  denyAction: {
+    backgroundColor: Colors.danger,
+    justifyContent:  'center',
+    alignItems:      'center',
+    paddingHorizontal: Spacing.px24,
+    gap:             4,
+    borderTopRightRadius:    Radius.xl,
+    borderBottomRightRadius: Radius.xl,
+  },
+  actionLabel: {
+    color:      Colors.white,
+    fontSize:   FontSize.label,
+    fontWeight: '600',
   },
 })

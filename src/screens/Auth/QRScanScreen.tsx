@@ -1,7 +1,7 @@
-import React, { useState, useRef } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  ActivityIndicator, Alert, StatusBar,
+  ActivityIndicator, Alert, StatusBar, Animated, Platform,
 } from 'react-native'
 import {
   Camera,
@@ -16,7 +16,8 @@ import {
 } from '../../api/server'
 import { useAppStore } from '../../store/useAppStore'
 import Config from 'react-native-config'
-import { Colors, Spacing, Radius, FontSize } from '../../constants/colors'
+import { GradientBackground } from '../../components/GradientBackground'
+import { Colors, Spacing, Radius, FontSize, FontFamily, Shadow } from '../../constants/colors'
 
 interface QRPayload {
   machineId:   string
@@ -25,12 +26,51 @@ interface QRPayload {
   apiUrl:      string
 }
 
+const FRAME  = 240
+const CORNER = 28
+const BORDER = 3
+
+// ── Pulsing scan brackets ─────────────────────────────────────────────────────
+function ScanBrackets({ connected }: { connected: boolean }) {
+  const scale = useRef(new Animated.Value(1)).current
+
+  useEffect(() => {
+    if (connected) {
+      Animated.spring(scale, {
+        toValue: 1.08, useNativeDriver: true, tension: 80, friction: 5,
+      }).start()
+      return
+    }
+
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(scale, { toValue: 1.03, duration: 1500, useNativeDriver: true }),
+        Animated.timing(scale, { toValue: 1.00, duration: 1500, useNativeDriver: true }),
+      ])
+    )
+    loop.start()
+    return () => loop.stop()
+  }, [connected])
+
+  const cornerColor = connected ? Colors.success : Colors.accent
+
+  return (
+    <Animated.View style={[styles.frame, { transform: [{ scale }] }]}>
+      <View style={[styles.corner, styles.tl, { borderColor: cornerColor }]} />
+      <View style={[styles.corner, styles.tr, { borderColor: cornerColor }]} />
+      <View style={[styles.corner, styles.bl, { borderColor: cornerColor }]} />
+      <View style={[styles.corner, styles.br, { borderColor: cornerColor }]} />
+    </Animated.View>
+  )
+}
+
 export function QRScanScreen() {
-  const setCredentials = useAppStore(s => s.setCredentials)
+  const setCredentials  = useAppStore(s => s.setCredentials)
   const { hasPermission, requestPermission } = useCameraPermission()
-  const device       = useCameraDevice('back')
-  const [loading,    setLoading] = useState(false)
-  const [debugMsg,   setDebugMsg] = useState('Waiting for QR…')
+  const device          = useCameraDevice('back')
+  const [loading,   setLoading]   = useState(false)
+  const [connected, setConnected] = useState(false)
+  const [statusMsg, setStatusMsg] = useState('Waiting for QR…')
   const isProcessing = useRef(false)
 
   const codeScanner = useCodeScanner({
@@ -38,36 +78,20 @@ export function QRScanScreen() {
     onCodeScanned: (codes) => {
       if (isProcessing.current) return
 
-      setDebugMsg(`Codes seen: ${codes.length}`)
-
       const raw = codes[0]?.value
-      if (!raw) { setDebugMsg('Code detected but no value'); return }
-
-      setDebugMsg(`Raw: ${raw.slice(0, 60)}`)
+      if (!raw) return
 
       let payload: QRPayload
-      try {
-        payload = JSON.parse(raw)
-      } catch {
-        setDebugMsg('JSON parse failed')
-        return
-      }
+      try { payload = JSON.parse(raw) } catch { return }
 
-      if (!payload.machineId || !payload.apiKey) {
-        setDebugMsg(`Missing fields. Keys: ${Object.keys(payload).join(', ')}`)
-        return
-      }
+      if (!payload.machineId || !payload.apiKey) return
 
-      // apiUrl is optional in the QR — falls back to the .env value
       const apiUrl = payload.apiUrl || Config.API_URL || ''
-      if (!apiUrl) {
-        setDebugMsg('No apiUrl in QR and API_URL not set in .env')
-        return
-      }
+      if (!apiUrl) { setStatusMsg('No API URL in QR code'); return }
 
       isProcessing.current = true
       setLoading(true)
-      setDebugMsg('Verifying with server…')
+      setStatusMsg('Connecting…')
 
       const creds: MachineCredentials = {
         machineId:   payload.machineId,
@@ -78,41 +102,54 @@ export function QRScanScreen() {
 
       verifyCredentials(creds)
         .then(() => {
+          setConnected(true)
+          setStatusMsg('Connected!')
           saveCredentials(creds)
-          setCredentials(creds)
+          setTimeout(() => setCredentials(creds), 600)
         })
         .catch((err: any) => {
-          setDebugMsg(`Server error: ${err.message}`)
+          setStatusMsg(err.message ?? 'Connection failed')
           Alert.alert(
             'Connection failed',
             err.message ?? 'Could not connect to machine.',
             [{ text: 'Try again', onPress: () => {
               isProcessing.current = false
               setLoading(false)
-              setDebugMsg('Waiting for QR…')
+              setStatusMsg('Waiting for QR…')
             }}]
           )
         })
     },
   })
 
+  // ── No camera permission ──────────────────────────────────────────────────
   if (!hasPermission) {
     return (
-      <View style={styles.center}>
-        <StatusBar barStyle="light-content" backgroundColor="#000" />
-        <Text style={styles.permText}>Camera access is required to scan the QR code.</Text>
-        <TouchableOpacity style={styles.btn} onPress={requestPermission}>
-          <Text style={styles.btnText}>Grant camera access</Text>
-        </TouchableOpacity>
-      </View>
+      <GradientBackground>
+        <StatusBar barStyle="dark-content" translucent backgroundColor="transparent" />
+        <View style={styles.permCenter}>
+          <View style={styles.logoBox}>
+            <Text style={styles.logoInitials}>VR</Text>
+          </View>
+          <Text style={styles.permTitle}>Camera access needed</Text>
+          <Text style={styles.permSub}>
+            Point your camera at the QR code shown on the Vibe Remote desktop app to connect your machine.
+          </Text>
+          <TouchableOpacity style={styles.inkBtn} onPress={requestPermission} activeOpacity={0.8}>
+            <Text style={styles.inkBtnText}>Grant camera access</Text>
+          </TouchableOpacity>
+        </View>
+      </GradientBackground>
     )
   }
 
   if (!device) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.permText}>No camera found on this device.</Text>
-      </View>
+      <GradientBackground>
+        <View style={styles.permCenter}>
+          <Text style={styles.permSub}>No camera found on this device.</Text>
+        </View>
+      </GradientBackground>
     )
   }
 
@@ -127,40 +164,38 @@ export function QRScanScreen() {
         codeScanner={codeScanner}
       />
 
-      {/* Overlay */}
+      {/* Dark overlay */}
       <View style={styles.overlay}>
+        {/* Top */}
         <View style={styles.topSection}>
           <View style={styles.logoBox}>
-            <Text style={styles.logoText}>AC</Text>
+            <Text style={styles.logoInitials}>VR</Text>
           </View>
-          <Text style={styles.title}>Agent Control</Text>
-          <Text style={styles.subtitle}>
-            Open the desktop app and scan the QR code shown on the dashboard.
+          <Text style={styles.cameraTitle}>Vibe Remote</Text>
+          <Text style={styles.cameraSubtitle}>
+            Scan the QR code shown on the desktop app dashboard.
           </Text>
         </View>
 
         {/* Scan frame */}
         <View style={styles.frameWrap}>
-          <View style={styles.frame}>
-            <View style={[styles.corner, styles.tl]} />
-            <View style={[styles.corner, styles.tr]} />
-            <View style={[styles.corner, styles.bl]} />
-            <View style={[styles.corner, styles.br]} />
-            {loading && (
-              <View style={styles.spinnerWrap}>
-                <ActivityIndicator size="large" color={Colors.primary} />
-                <Text style={styles.connectingText}>Connecting…</Text>
-              </View>
-            )}
-          </View>
+          <ScanBrackets connected={connected} />
+          {loading && (
+            <View style={styles.spinnerWrap}>
+              <ActivityIndicator size="large" color={Colors.success} />
+            </View>
+          )}
         </View>
 
+        {/* Status pill */}
         <View style={styles.bottomSection}>
-          <Text style={styles.hint}>
-            Point your camera at the QR code on the Vibe Remote desktop app.
-          </Text>
-          <View style={styles.debugBox}>
-            <Text style={styles.debugText}>{debugMsg}</Text>
+          <View style={[
+            styles.statusPill,
+            connected && { backgroundColor: Colors.risk.low.bg, borderColor: Colors.risk.low.border },
+          ]}>
+            <Text style={[styles.statusText, connected && { color: Colors.risk.low.text }]}>
+              {statusMsg}
+            </Text>
           </View>
         </View>
       </View>
@@ -168,148 +203,143 @@ export function QRScanScreen() {
   )
 }
 
-const FRAME = 240
-const CORNER = 24
-const BORDER = 3
-
 const styles = StyleSheet.create({
   root: {
     flex:            1,
     backgroundColor: '#000',
   },
-  center: {
-    flex:            1,
-    justifyContent:  'center',
+
+  // Permission fallback (on gradient)
+  permCenter: {
+    flex:              1,
+    justifyContent:    'center',
+    alignItems:        'center',
+    paddingHorizontal: Spacing.px32,
+    paddingTop:        Spacing.px56,
+    gap:               Spacing.px16,
+  },
+  logoBox: {
+    width:           60,
+    height:          60,
+    borderRadius:    Radius.lg,
+    backgroundColor: Colors.accentLight,
     alignItems:      'center',
-    backgroundColor: Colors.bgPrimary,
-    padding:         Spacing.xxl,
-    gap:             Spacing.lg,
+    justifyContent:  'center',
+    marginBottom:    Spacing.px8,
   },
-  permText: {
-    fontSize:  FontSize.md,
-    color:     Colors.textSecondary,
-    textAlign: 'center',
+  logoInitials: {
+    fontSize:      16,
+    fontWeight:    '700',
+    fontFamily:    FontFamily.serifBold,
+    color:         Colors.accentDeep,
+    letterSpacing: 1,
   },
-  btn: {
-    backgroundColor: Colors.primary,
-    paddingHorizontal: Spacing.xl,
-    paddingVertical:   Spacing.md,
-    borderRadius:      Radius.md,
+  permTitle: {
+    fontSize:      FontSize.displayM,
+    fontWeight:    '500',
+    fontFamily:    FontFamily.serifBold,
+    color:         Colors.textPrimary,
+    textAlign:     'center',
+    letterSpacing: -0.4,
   },
-  btnText: {
-    color:      Colors.white,
+  permSub: {
+    fontSize:   FontSize.body,
+    color:      Colors.textSecondary,
+    textAlign:  'center',
+    lineHeight: 22,
+    maxWidth:   280,
+  },
+  inkBtn: {
+    marginTop:       Spacing.px8,
+    height:          56,
+    borderRadius:    Radius.full,
+    backgroundColor: Colors.inkBlack,
+    paddingHorizontal: Spacing.px32,
+    alignItems:      'center',
+    justifyContent:  'center',
+    ...Shadow.inkPill,
+  },
+  inkBtnText: {
+    fontSize:   FontSize.body,
     fontWeight: '600',
-    fontSize:   FontSize.md,
+    color:      Colors.textInverse,
   },
+
+  // Camera overlay
   overlay: {
     ...StyleSheet.absoluteFill,
     justifyContent: 'space-between',
     alignItems:     'center',
   },
   topSection: {
-    alignItems:      'center',
-    paddingTop:      60,
-    paddingHorizontal: Spacing.xxl,
-    gap:             Spacing.sm,
+    alignItems:        'center',
+    paddingTop:        Platform.OS === 'ios' ? 72 : 56,
+    paddingHorizontal: Spacing.px32,
+    gap:               Spacing.px8,
+    backgroundColor:   'rgba(0,0,0,0.55)',
+    width:             '100%',
+    paddingBottom:     Spacing.px24,
   },
-  logoBox: {
-    width:           48,
-    height:          48,
-    borderRadius:    Radius.lg,
-    backgroundColor: Colors.primary,
-    alignItems:      'center',
-    justifyContent:  'center',
-    marginBottom:    Spacing.xs,
+  cameraTitle: {
+    fontSize:      FontSize.displayM,
+    fontWeight:    '700',
+    color:         '#FFFFFF',
+    letterSpacing: -0.3,
   },
-  logoText: {
-    fontSize:   18,
-    fontWeight: '700',
-    color:      Colors.white,
-  },
-  title: {
-    fontSize:   FontSize.xl,
-    fontWeight: '700',
-    color:      '#fff',
-  },
-  subtitle: {
-    fontSize:  FontSize.sm,
-    color:     'rgba(255,255,255,0.75)',
-    textAlign: 'center',
+  cameraSubtitle: {
+    fontSize:   FontSize.label,
+    color:      'rgba(255,255,255,0.70)',
+    textAlign:  'center',
     lineHeight: 20,
   },
+
+  // Scan brackets
   frameWrap: {
     alignItems:     'center',
     justifyContent: 'center',
   },
   frame: {
-    width:           FRAME,
-    height:          FRAME,
-    justifyContent:  'center',
-    alignItems:      'center',
+    width:          FRAME,
+    height:         FRAME,
+    justifyContent: 'center',
+    alignItems:     'center',
   },
   corner: {
-    position:  'absolute',
-    width:     CORNER,
-    height:    CORNER,
-    borderColor: Colors.primary,
+    position: 'absolute',
+    width:    CORNER,
+    height:   CORNER,
   },
-  tl: {
-    top:         0,
-    left:        0,
-    borderTopWidth:  BORDER,
-    borderLeftWidth: BORDER,
-    borderTopLeftRadius: 4,
-  },
-  tr: {
-    top:          0,
-    right:        0,
-    borderTopWidth:   BORDER,
-    borderRightWidth: BORDER,
-    borderTopRightRadius: 4,
-  },
-  bl: {
-    bottom:           0,
-    left:             0,
-    borderBottomWidth: BORDER,
-    borderLeftWidth:   BORDER,
-    borderBottomLeftRadius: 4,
-  },
-  br: {
-    bottom:            0,
-    right:             0,
-    borderBottomWidth:  BORDER,
-    borderRightWidth:   BORDER,
-    borderBottomRightRadius: 4,
-  },
+  tl: { top: 0, left: 0,  borderTopWidth: BORDER,    borderLeftWidth:  BORDER, borderTopLeftRadius:     6 },
+  tr: { top: 0, right: 0, borderTopWidth: BORDER,    borderRightWidth: BORDER, borderTopRightRadius:    6 },
+  bl: { bottom: 0, left: 0,  borderBottomWidth: BORDER, borderLeftWidth:  BORDER, borderBottomLeftRadius:  6 },
+  br: { bottom: 0, right: 0, borderBottomWidth: BORDER, borderRightWidth: BORDER, borderBottomRightRadius: 6 },
   spinnerWrap: {
-    alignItems: 'center',
-    gap:        Spacing.sm,
+    position:       'absolute',
+    alignItems:     'center',
+    justifyContent: 'center',
   },
-  connectingText: {
-    color:    '#fff',
-    fontSize: FontSize.sm,
-  },
+
+  // Status
   bottomSection: {
-    paddingBottom:     48,
-    paddingHorizontal: Spacing.xxl,
+    paddingBottom:     Platform.OS === 'ios' ? 60 : 40,
+    paddingHorizontal: Spacing.px32,
+    alignItems:        'center',
+    width:             '100%',
+    backgroundColor:   'rgba(0,0,0,0.55)',
+    paddingTop:        Spacing.px24,
   },
-  hint: {
-    fontSize:  FontSize.xs,
-    color:     'rgba(255,255,255,0.6)',
-    textAlign: 'center',
-    lineHeight: 18,
+  statusPill: {
+    backgroundColor:   'rgba(0,0,0,0.50)',
+    borderRadius:      Radius.full,
+    paddingHorizontal: Spacing.px16,
+    paddingVertical:   Spacing.px8,
+    borderWidth:       1,
+    borderColor:       'rgba(255,255,255,0.15)',
   },
-  debugBox: {
-    marginTop:         12,
-    backgroundColor:   'rgba(0,0,0,0.6)',
-    borderRadius:      6,
-    paddingHorizontal: 10,
-    paddingVertical:   6,
-  },
-  debugText: {
-    fontSize:   10,
-    color:      '#0f0',
-    fontFamily: 'monospace',
+  statusText: {
+    fontSize:   FontSize.label,
+    color:      'rgba(255,255,255,0.80)',
+    fontWeight: '500',
     textAlign:  'center',
   },
 })
