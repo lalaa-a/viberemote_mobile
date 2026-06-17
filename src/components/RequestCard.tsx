@@ -7,6 +7,7 @@ import { formatDistanceToNow } from 'date-fns'
 import Ionicons from 'react-native-vector-icons/Ionicons'
 import { Colors, Spacing, Radius, FontSize, FontFamily, Shadow } from '../constants/colors'
 import { RiskBadge } from './RiskBadge'
+import { HarnessBadge } from './HarnessBadge'
 import type { PendingRequest } from '../types'
 
 interface Props {
@@ -101,6 +102,9 @@ export function RequestCard({ request, onPress, onApprove, onDeny }: Props) {
               <Text style={styles.metaSep}>·</Text>
               <Text style={styles.timeText}>{timeAgo}</Text>
             </View>
+            {request.harness && request.harness !== 'claude-code' && (
+              <HarnessBadge harness={request.harness} size="xs" />
+            )}
           </View>
         </View>
       </TouchableOpacity>
@@ -214,8 +218,9 @@ const styles = StyleSheet.create({
     marginVertical:  Spacing.px4,
   },
   metaRow: {
-    flexDirection: 'row',
-    alignItems:    'center',
+    flexDirection:  'row',
+    alignItems:     'center',
+    justifyContent: 'space-between',
   },
   machineRow: {
     flexDirection: 'row',

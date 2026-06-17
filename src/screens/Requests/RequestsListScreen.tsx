@@ -10,6 +10,7 @@ import Ionicons from 'react-native-vector-icons/Ionicons'
 import { usePendingRequests, useHistory, useDecideRequest } from '../../hooks/useRequests'
 import { RequestCard } from '../../components/RequestCard'
 import { GradientBackground } from '../../components/GradientBackground'
+import { LiveBadge } from '../../components/LiveBadge'
 import { Colors, Spacing, FontSize, Radius, Shadow, FontFamily, TAB_BOTTOM_INSET } from '../../constants/colors'
 import type { RequestsStackParamList, PendingRequest } from '../../types'
 
@@ -132,10 +133,7 @@ export function RequestsListScreen() {
           <Text style={styles.appName}>Vibe Remote</Text>
           <Text style={styles.title}>Requests</Text>
         </View>
-        <View style={styles.liveIndicator}>
-          <View style={styles.liveDot} />
-          <Text style={styles.liveText}>live</Text>
-        </View>
+        <LiveBadge />
       </View>
 
       {/* Filter chips */}
@@ -262,28 +260,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color:      Colors.textTertiary,
     letterSpacing: 0.3,
-  },
-  liveIndicator: {
-    flexDirection:     'row',
-    alignItems:        'center',
-    gap:               4,
-    backgroundColor:   Colors.surfaceGlassStrong,
-    borderRadius:      Radius.full,
-    paddingHorizontal: Spacing.px8,
-    paddingVertical:   4,
-    borderWidth:       1,
-    borderColor:       Colors.borderHairline,
-  },
-  liveDot: {
-    width:           6,
-    height:          6,
-    borderRadius:    Radius.full,
-    backgroundColor: Colors.accent,
-  },
-  liveText: {
-    fontSize:  FontSize.microLabel,
-    color:     Colors.textSecondary,
-    fontStyle: 'italic',
   },
   // Filter chips
   filtersWrap: {

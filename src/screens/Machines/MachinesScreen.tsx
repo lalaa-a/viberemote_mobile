@@ -1,18 +1,75 @@
 import React from 'react'
 import {
   View, Text, FlatList, StyleSheet,
-  RefreshControl, StatusBar, TouchableOpacity, Alert,
+  RefreshControl, StatusBar, TouchableOpacity, Alert, ActivityIndicator,
 } from 'react-native'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { formatDistanceToNow } from 'date-fns'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import Ionicons from 'react-native-vector-icons/Ionicons'
 import { fetchMachines } from '../../api/machines'
+import { fetchHarnessState, desireHarnessToggle } from '../../api/server'
 import { useAuth } from '../../hooks/useAuth'
 import { GradientBackground } from '../../components/GradientBackground'
+import { HarnessBadge } from '../../components/HarnessBadge'
 import { Colors, Spacing, Radius, FontSize, FontFamily, Shadow, TAB_BOTTOM_INSET } from '../../constants/colors'
-import type { Machine } from '../../types'
+import type { Machine, MachineHarness } from '../../types'
 
+// ── Harness panel (per machine) ───────────────────────────────────────────────
+function HarnessPanel({ machineId, isOnline }: { machineId: string; isOnline: boolean }) {
+  const queryClient = useQueryClient()
+
+  const { data: harnesses = [], isLoading } = useQuery({
+    queryKey:        ['harnesses', machineId],
+    queryFn:         () => fetchHarnessState(machineId),
+    refetchInterval: 30_000,
+    enabled:         isOnline,
+  })
+
+  const toggle = useMutation({
+    mutationFn: ({ harness, enabled }: { harness: string; enabled: boolean }) =>
+      desireHarnessToggle(machineId, harness, enabled),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['harnesses', machineId] }),
+  })
+
+  const installed = harnesses.filter(h => h.installed)
+  if (!isOnline && installed.length === 0) return null
+  if (isLoading) {
+    return (
+      <View style={hStyles.loading}>
+        <ActivityIndicator size="small" color={Colors.textTertiary} />
+      </View>
+    )
+  }
+  if (installed.length === 0) return null
+
+  return (
+    <View style={hStyles.panel}>
+      <Text style={hStyles.panelTitle}>HARNESS MOBILE SUPPORT</Text>
+      {installed.map(h => (
+        <View key={h.harness} style={hStyles.row}>
+          <View style={hStyles.rowLeft}>
+            <HarnessBadge harness={h.harness} size="sm" />
+            {h.version && <Text style={hStyles.version}>v{h.version}</Text>}
+          </View>
+          <TouchableOpacity
+            style={[hStyles.toggleBtn, h.mobile_enabled && hStyles.toggleBtnOn]}
+            onPress={() => toggle.mutate({ harness: h.harness, enabled: !h.mobile_enabled })}
+            disabled={toggle.isPending || !isOnline}
+            activeOpacity={0.75}
+          >
+            <View style={[hStyles.thumb, h.mobile_enabled && hStyles.thumbOn]} />
+          </TouchableOpacity>
+        </View>
+      ))}
+      {!isOnline && (
+        <Text style={hStyles.offlineNote}>Machine offline — toggles apply when it reconnects.</Text>
+      )}
+    </View>
+  )
+}
+
+// ── Machine card ──────────────────────────────────────────────────────────────
 function MachineCard({ machine }: { machine: Machine }) {
   const lastSeen = machine.last_seen
     ? formatDistanceToNow(new Date(machine.last_seen), { addSuffix: true })
@@ -21,17 +78,14 @@ function MachineCard({ machine }: { machine: Machine }) {
 
   return (
     <View style={styles.card}>
-      <View style={styles.cardLeft}>
-        <View style={[
-          styles.statusDot,
-          { backgroundColor: isOnline ? Colors.success : Colors.borderHairline },
-        ]} />
-        <View style={styles.cardInfo}>
-          <Text style={styles.machineLabel}>{machine.label}</Text>
-          <Text style={styles.machineId} numberOfLines={1}>{machine.id}</Text>
+      <View style={styles.cardTopRow}>
+        <View style={styles.nameRow}>
+          <View style={[
+            styles.statusDot,
+            { backgroundColor: isOnline ? Colors.success : Colors.borderHairline },
+          ]} />
+          <Text style={styles.machineLabel} numberOfLines={1}>{machine.label}</Text>
         </View>
-      </View>
-      <View style={styles.cardRight}>
         <View style={[
           styles.statusPill,
           {
@@ -45,11 +99,21 @@ function MachineCard({ machine }: { machine: Machine }) {
             styles.statusText,
             { color: isOnline ? Colors.successDark : Colors.textTertiary },
           ]}>
-            {isOnline ? 'Online' : 'Offline'}
+            {isOnline ? 'ONLINE' : 'OFFLINE'}
           </Text>
         </View>
-        <Text style={styles.lastSeen}>{lastSeen}</Text>
       </View>
+
+      <Text style={styles.machineId} numberOfLines={1}>{machine.id}</Text>
+
+      <View style={styles.cardBottomRow}>
+        <View style={styles.lastSeenRow}>
+          <Ionicons name="time-outline" size={14} color={Colors.textTertiary} />
+          <Text style={styles.lastSeen}>Last seen {lastSeen}</Text>
+        </View>
+      </View>
+
+      <HarnessPanel machineId={machine.id} isOnline={isOnline} />
     </View>
   )
 }
@@ -91,6 +155,7 @@ export function MachinesScreen() {
           style={styles.disconnectBtn}
           activeOpacity={0.7}
         >
+          <Ionicons name="log-out-outline" size={14} color={Colors.danger} />
           <Text style={styles.disconnectText}>Disconnect</Text>
         </TouchableOpacity>
       </View>
@@ -150,17 +215,20 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   disconnectBtn: {
+    flexDirection:     'row',
+    alignItems:        'center',
+    gap:               Spacing.px4,
     paddingHorizontal: Spacing.px12,
     paddingVertical:   Spacing.px8,
-    borderRadius:      Radius.sm,
+    borderRadius:      Radius.full,
+    backgroundColor:   Colors.dangerLight + 'AA',
     borderWidth:       1,
-    borderColor:       Colors.danger + '50',
-    justifyContent:    'center',
+    borderColor:       Colors.danger + '40',
   },
   disconnectText: {
     fontSize:  FontSize.label,
     color:     Colors.danger,
-    fontWeight:'500',
+    fontWeight:'600',
   },
   listContent: {
     paddingHorizontal: Spacing.px20,
@@ -169,54 +237,69 @@ const styles = StyleSheet.create({
     gap:               Spacing.px12,
   },
   card: {
-    flexDirection:   'row',
-    alignItems:      'center',
-    justifyContent:  'space-between',
     backgroundColor: Colors.bgPrimary,
     borderRadius:    Radius.md,
-    padding:         Spacing.px20,
+    paddingHorizontal: Spacing.px16,
+    paddingTop:      Spacing.px16,
+    paddingBottom:   Spacing.px12,
     borderWidth:     1,
     borderColor:     Colors.borderHairline,
-    borderTopColor:  Colors.borderGlass,
+    gap:             Spacing.px8,
     ...Shadow.glassLow,
   },
-  cardLeft: {
+  cardTopRow: {
+    flexDirection:  'row',
+    alignItems:     'center',
+    justifyContent: 'space-between',
+    gap:            Spacing.px8,
+  },
+  nameRow: {
     flexDirection: 'row',
     alignItems:    'center',
-    gap:           Spacing.px12,
+    gap:           Spacing.px8,
     flex:          1,
   },
   statusDot: {
-    width:        10,
-    height:       10,
+    width:        9,
+    height:       9,
     borderRadius: Radius.full,
     flexShrink:   0,
   },
-  cardInfo: { flex: 1, gap: 2 },
   machineLabel: {
-    fontSize:   FontSize.label,
+    fontSize:   FontSize.cardTitle,
+    fontFamily: FontFamily.loraItalic,
     fontWeight: '600',
     color:      Colors.textPrimary,
+    flex:       1,
   },
   machineId: {
-    fontSize: FontSize.monoSmall,
-    color:    Colors.textTertiary,
-  },
-  cardRight: {
-    alignItems: 'flex-end',
-    gap:        4,
+    fontSize:    FontSize.monoSmall,
+    fontFamily:  FontFamily.mono,
+    color:       Colors.textTertiary,
+    paddingLeft: 17,
   },
   statusPill: {
     paddingHorizontal: Spacing.px8,
     paddingVertical:   3,
     borderRadius:      Radius.full,
     borderWidth:       1,
+    flexShrink:        0,
   },
   statusText: {
     fontSize:      FontSize.microLabel,
-    fontWeight:    '600',
-    letterSpacing: 0.3,
-    textTransform: 'uppercase',
+    fontWeight:    '700',
+    letterSpacing: 0.5,
+  },
+  cardBottomRow: {
+    flexDirection:  'row',
+    alignItems:     'center',
+    justifyContent: 'space-between',
+    paddingTop:     Spacing.px4,
+  },
+  lastSeenRow: {
+    flexDirection: 'row',
+    alignItems:    'center',
+    gap:           Spacing.px4,
   },
   lastSeen: {
     fontSize: FontSize.metadata,
@@ -255,5 +338,73 @@ const styles = StyleSheet.create({
   code: {
     fontSize: FontSize.monoSmall,
     color:    Colors.accent,
+  },
+})
+
+// Separate stylesheet so the panel styles don't pollute the main one
+const hStyles = StyleSheet.create({
+  loading: {
+    paddingVertical: Spacing.px8,
+    alignItems:      'center',
+  },
+  panel: {
+    marginTop:    Spacing.px8,
+    paddingTop:   Spacing.px12,
+    borderTopWidth: 1,
+    borderTopColor: Colors.borderHairline,
+    gap:          Spacing.px8,
+  },
+  panelTitle: {
+    fontSize:      FontSize.microLabel,
+    fontWeight:    '600',
+    color:         Colors.textTertiary,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+    marginBottom:  Spacing.px4,
+  },
+  row: {
+    flexDirection:  'row',
+    alignItems:     'center',
+    justifyContent: 'space-between',
+  },
+  rowLeft: {
+    flexDirection: 'row',
+    alignItems:    'center',
+    gap:           Spacing.px8,
+  },
+  version: {
+    fontSize:  FontSize.metadata,
+    color:     Colors.textTertiary,
+    fontStyle: 'italic',
+  },
+  toggleBtn: {
+    width:        44,
+    height:       24,
+    borderRadius: Radius.full,
+    backgroundColor: Colors.borderHairline,
+    borderWidth:  1,
+    borderColor:  Colors.borderHairline,
+    justifyContent: 'center',
+    padding:      2,
+  },
+  toggleBtnOn: {
+    backgroundColor: Colors.successDark,
+    borderColor:     Colors.successDark,
+  },
+  thumb: {
+    width:        18,
+    height:       18,
+    borderRadius: Radius.full,
+    backgroundColor: Colors.textTertiary,
+  },
+  thumbOn: {
+    backgroundColor: '#fff',
+    alignSelf:       'flex-end',
+  },
+  offlineNote: {
+    fontSize:  FontSize.metadata,
+    color:     Colors.textTertiary,
+    fontStyle: 'italic',
+    marginTop: Spacing.px4,
   },
 })

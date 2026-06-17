@@ -1,5 +1,5 @@
 import { createMMKV } from 'react-native-mmkv'
-import type { Machine, PendingRequest, AgentSession, MobileCommand, FsNode, TerminalEvent } from '../types'
+import type { Machine, PendingRequest, AgentSession, MobileCommand, FsNode, TerminalEvent, MachineHarness, FeedPage } from '../types'
 
 const storage = createMMKV({ id: 'machine-credentials' })
 
@@ -108,8 +108,30 @@ export function fetchSessions(): Promise<AgentSession[]> {
   return request<AgentSession[]>('/mobile/sessions')
 }
 
+/** Pending requests only — used by the approval list. */
 export function fetchSessionRequests(sessionId: string): Promise<PendingRequest[]> {
+  return request<PendingRequest[]>(`/mobile/sessions/${encodeURIComponent(sessionId)}/requests?pending=true`)
+}
+
+/** All requests (any status) for a session — used by the chat feed. */
+export function fetchSessionAllRequests(sessionId: string): Promise<PendingRequest[]> {
   return request<PendingRequest[]>(`/mobile/sessions/${encodeURIComponent(sessionId)}/requests`)
+}
+
+/**
+ * Unified, cursor-paginated chat feed for a session (WhatsApp/Telegram style).
+ * Pass `before` (an ISO timestamp = the previous page's nextCursor) to load
+ * older history; omit it for the most-recent page.
+ */
+export function fetchSessionFeed(
+  sessionId: string,
+  opts: { before?: string; limit?: number } = {},
+): Promise<FeedPage> {
+  const params = new URLSearchParams({ limit: String(opts.limit ?? 40) })
+  if (opts.before) params.set('before', opts.before)
+  return request<FeedPage>(
+    `/mobile/sessions/${encodeURIComponent(sessionId)}/feed?${params}`,
+  )
 }
 
 // ── Prompt injection ───────────────────────────────────────────────────────────
@@ -155,4 +177,49 @@ export function pollFileTreeResult(requestId: string): Promise<{
   error?:  string
 }> {
   return request(`/mobile/fs/result/${requestId}`)
+}
+
+// ── Harness state (user-authed — reads /harness/:machineId) ───────────────────
+// The harness routes are authenticated with the Supabase user JWT (not machine
+// API key) because the phone is reading per-machine state by ownership, not by
+// being the machine. We lazy-import supabase here to avoid a circular dep.
+
+async function userAuthHeader(): Promise<Record<string, string>> {
+  const { supabase } = await import('./supabase')
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session?.access_token) throw new Error('Not authenticated')
+  return { 'Authorization': `Bearer ${session.access_token}`, 'Content-Type': 'application/json' }
+}
+
+function apiBase(): string {
+  const creds = getCredentials()
+  if (!creds) throw new Error('Not authenticated')
+  return creds.apiUrl
+}
+
+export async function fetchHarnessState(machineId: string): Promise<MachineHarness[]> {
+  const headers = await userAuthHeader()
+  const res = await fetch(`${apiBase()}/harness/${machineId}`, { headers })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({})) as any
+    throw new Error(err.error ?? `fetchHarnessState failed (${res.status})`)
+  }
+  return res.json() as Promise<MachineHarness[]>
+}
+
+export async function desireHarnessToggle(
+  machineId: string,
+  harness:   string,
+  enabled:   boolean,
+): Promise<void> {
+  const headers = await userAuthHeader()
+  const res = await fetch(`${apiBase()}/harness/${machineId}/desire`, {
+    method:  'POST',
+    headers,
+    body:    JSON.stringify({ harness, enabled }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({})) as any
+    throw new Error(err.error ?? `desireHarnessToggle failed (${res.status})`)
+  }
 }

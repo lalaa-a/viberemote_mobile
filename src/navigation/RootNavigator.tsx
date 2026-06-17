@@ -16,11 +16,10 @@ import { QRScanScreen } from '../screens/Auth/QRScanScreen'
 import { RequestsListScreen } from '../screens/Requests/RequestsListScreen'
 import { RequestDetailScreen } from '../screens/Requests/RequestDetailScreen'
 import { SessionsScreen } from '../screens/Sessions/SessionsScreen'
-import { SessionDetailScreen } from '../screens/Sessions/SessionDetailScreen'
-import { PromptComposeScreen } from '../screens/Sessions/PromptComposeScreen'
+import { ChatScreen } from '../screens/Sessions/ChatScreen'
 import { FileBrowserScreen } from '../screens/Sessions/FileBrowserScreen'
+import { RequestDetailScreen as RequestDetailFromChat } from '../screens/Requests/RequestDetailScreen'
 import { MachinesScreen } from '../screens/Machines/MachinesScreen'
-import { TerminalScreen } from '../screens/Terminal/TerminalScreen'
 import { usePendingRequests } from '../hooks/useRequests'
 import { useSessions } from '../hooks/useSessions'
 import { usePushNotifications } from '../hooks/usePushNotifications'
@@ -52,10 +51,9 @@ const TAB_META: Record<string, {
   iconActive:   string
   iconInactive: string
 }> = {
-  RequestsTab: { label: 'Requests', iconActive: 'notifications',  iconInactive: 'notifications-outline' },
-  SessionsTab: { label: 'Sessions', iconActive: 'flash',          iconInactive: 'flash-outline'         },
-  MachinesTab: { label: 'Machines', iconActive: 'server',         iconInactive: 'server-outline'        },
-  TerminalTab: { label: 'Terminal', iconActive: 'terminal',       iconInactive: 'terminal-outline'      },
+  RequestsTab: { label: 'Requests', iconActive: 'notifications', iconInactive: 'notifications-outline' },
+  ChatsTab:    { label: 'Chats',    iconActive: 'chatbubbles',   iconInactive: 'chatbubbles-outline'   },
+  MachinesTab: { label: 'Machines', iconActive: 'server',        iconInactive: 'server-outline'        },
 }
 
 // ── Single tab button ─────────────────────────────────────────────────────────
@@ -88,7 +86,7 @@ function TabButton({
       {badge > 0 && (
         <View style={[
           styles.badge,
-          { backgroundColor: routeName === 'SessionsTab' ? Colors.successDark : Colors.danger },
+          { backgroundColor: routeName === 'ChatsTab' ? Colors.successDark : Colors.danger },
         ]}>
           <Text style={styles.badgeText}>{badge > 99 ? '99+' : badge}</Text>
         </View>
@@ -158,34 +156,29 @@ function RequestsNavigator() {
   )
 }
 
-// ── Sessions stack ────────────────────────────────────────────────────────────
-function SessionsNavigator() {
+// ── Chats stack ───────────────────────────────────────────────────────────────
+function ChatsNavigator() {
   return (
     <SessionsStack.Navigator screenOptions={HEADER_OPTS}>
       <SessionsStack.Screen
-        name="SessionsList"
+        name="ChatsList"
         component={SessionsScreen}
         options={{ headerShown: false }}
       />
       <SessionsStack.Screen
-        name="SessionDetail"
-        component={SessionDetailScreen}
+        name="Chat"
+        component={ChatScreen}
         options={{ headerShown: false }}
       />
       <SessionsStack.Screen
         name="RequestDetail"
-        component={RequestDetailScreen}
+        component={RequestDetailFromChat}
         options={{ headerShown: false }}
       />
       <SessionsStack.Screen
         name="FileBrowser"
         component={FileBrowserScreen}
         options={({ route }) => ({ title: route.params.machineLabel })}
-      />
-      <SessionsStack.Screen
-        name="PromptCompose"
-        component={PromptComposeScreen}
-        options={{ headerShown: false, presentation: 'modal' }}
       />
     </SessionsStack.Navigator>
   )
@@ -197,8 +190,8 @@ function AppNavigator() {
   const { data: sessions = [] } = useSessions()
   usePushNotifications()
 
-  const pendingCount   = pending.length
-  const activeSessions = sessions.filter(s => s.status === 'active').length
+  const pendingCount = pending.length
+  const activeChats  = sessions.filter(s => s.pending_count > 0).reduce((n, s) => n + s.pending_count, 0)
 
   return (
     <Tab.Navigator
@@ -208,15 +201,14 @@ function AppNavigator() {
           {...props}
           badges={{
             RequestsTab: pendingCount,
-            SessionsTab: activeSessions,
+            ChatsTab:    activeChats,
           }}
         />
       )}
     >
       <Tab.Screen name="RequestsTab" component={RequestsNavigator} />
-      <Tab.Screen name="SessionsTab" component={SessionsNavigator} />
-      <Tab.Screen name="MachinesTab"  component={MachinesScreen} />
-      <Tab.Screen name="TerminalTab" component={TerminalScreen} />
+      <Tab.Screen name="ChatsTab"    component={ChatsNavigator} />
+      <Tab.Screen name="MachinesTab" component={MachinesScreen} />
     </Tab.Navigator>
   )
 }

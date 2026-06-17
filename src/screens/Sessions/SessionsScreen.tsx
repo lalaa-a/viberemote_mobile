@@ -1,7 +1,7 @@
-import React, { useRef, useEffect } from 'react'
+import React from 'react'
 import {
   View, Text, FlatList, StyleSheet,
-  RefreshControl, TouchableOpacity, StatusBar, Animated,
+  RefreshControl, TouchableOpacity, StatusBar,
 } from 'react-native'
 import { useNavigation } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
@@ -10,8 +10,15 @@ import { formatDistanceToNow } from 'date-fns'
 import Ionicons from 'react-native-vector-icons/Ionicons'
 import { useSessions } from '../../hooks/useSessions'
 import { GradientBackground } from '../../components/GradientBackground'
+import { LiveBadge } from '../../components/LiveBadge'
+import { HarnessBadge } from '../../components/HarnessBadge'
 import { Colors, Spacing, Radius, FontSize, FontFamily, Shadow, TAB_BOTTOM_INSET } from '../../constants/colors'
-import type { SessionsStackParamList, AgentSession } from '../../types'
+import type { SessionsStackParamList, AgentSession, HarnessId } from '../../types'
+
+function dirName(cwd: string | null): string {
+  if (!cwd) return '~'
+  return cwd.split(/[\\/]/).filter(Boolean).pop() ?? cwd
+}
 
 type Nav = NativeStackNavigationProp<SessionsStackParamList>
 
@@ -21,103 +28,57 @@ const STATUS_COLOR: Record<string, string> = {
   finished: Colors.textTertiary,
 }
 
-// ── Pulsing dot ───────────────────────────────────────────────────────────────
-function PulseDot({ color, active }: { color: string; active: boolean }) {
-  const pulse = useRef(new Animated.Value(1)).current
 
-  useEffect(() => {
-    if (!active) return
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulse, { toValue: 1.7, duration: 900, useNativeDriver: true }),
-        Animated.timing(pulse, { toValue: 1,   duration: 900, useNativeDriver: true }),
-      ])
-    )
-    loop.start()
-    return () => loop.stop()
-  }, [active])
 
-  return (
-    <View style={styles.dotWrap}>
-      {active && (
-        <Animated.View style={[
-          styles.dotPulse,
-          { backgroundColor: color, transform: [{ scale: pulse }] },
-        ]} />
-      )}
-      <View style={[styles.dot, { backgroundColor: color }]} />
-    </View>
-  )
-}
-
-// ── Session card ──────────────────────────────────────────────────────────────
-function SessionCard({ session, onDetail, onPrompt }: {
-  session:  AgentSession
-  onDetail: () => void
-  onPrompt: () => void
+// ── Chat card — one session = one WhatsApp-style chat entry ──────────────────
+function SessionCard({ session, onOpen }: {
+  session: AgentSession
+  onOpen:  () => void
 }) {
-  const dotColor    = STATUS_COLOR[session.status] ?? Colors.textTertiary
-  const statusLabel = session.status === 'active' ? 'Active'
-                    : session.status === 'idle'   ? 'Idle' : 'Finished'
-  const canPrompt   = session.pending_count === 0 && session.status !== 'finished'
-  const isActive    = session.status === 'active'
+  const cliClosed = session.cli_alive === false && session.status !== 'active'
+  const dotColor  = cliClosed ? Colors.textTertiary : (STATUS_COLOR[session.status] ?? Colors.textTertiary)
+  const isActive  = session.status === 'active'
+  const hasPending = session.pending_count > 0
+  const dir       = dirName(session.cwd)
+  const timeAgo   = session.last_activity_at
+    ? formatDistanceToNow(new Date(session.last_activity_at), { addSuffix: true })
+    : ''
 
   return (
-    <View style={styles.card}>
-      {/* Top row: status pill · tool icon */}
-      <View style={styles.cardTop}>
-        <View style={styles.statusPill}>
-          <PulseDot color={dotColor} active={isActive} />
-          <Text style={[styles.statusText, { color: dotColor }]}>{statusLabel}</Text>
+    <TouchableOpacity style={styles.card} onPress={onOpen} activeOpacity={0.75}>
+      {/* Avatar — directory initial + status ring */}
+      <View style={[styles.avatar, { borderColor: dotColor + '60' }]}>
+        <Text style={styles.avatarText}>{dir.charAt(0).toUpperCase()}</Text>
+        {isActive && <View style={[styles.avatarDot, { backgroundColor: Colors.success }]} />}
+      </View>
+
+      {/* Content */}
+      <View style={styles.cardBody}>
+        <View style={styles.cardTopRow}>
+          <View style={styles.cardTitleRow}>
+            <Text style={styles.cardTitle} numberOfLines={1}>{dir}</Text>
+            <HarnessBadge harness={(session.harness ?? 'claude-code') as HarnessId} size="xs" />
+          </View>
+          <Text style={styles.timeText}>{timeAgo}</Text>
         </View>
-        <Ionicons name="terminal-outline" size={18} color={Colors.accentDeep}/>
+
+        <View style={styles.cardBottomRow}>
+          <View style={styles.cardMeta}>
+            <View style={[styles.statusDot, { backgroundColor: dotColor }]} />
+            <Text style={[styles.statusLabel, { color: dotColor }]}>
+              {cliClosed ? 'Closed' : isActive ? 'Active' : session.status === 'idle' ? 'Idle' : 'Finished'}
+            </Text>
+            <Text style={styles.metaSep}>·</Text>
+            <Text style={styles.machineText} numberOfLines={1}>{session.machine_label}</Text>
+          </View>
+          {hasPending && (
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>{session.pending_count}</Text>
+            </View>
+          )}
+        </View>
       </View>
-
-      {/* Title */}
-      <Text style={styles.cardTitle} numberOfLines={2}>
-        {session.machine_label}
-      </Text>
-
-      {/* Path row */}
-      <View style={styles.pathRow}>
-        <Ionicons name="folder-outline" size={14} color={Colors.textTertiary} />
-        <Text style={styles.pathText} numberOfLines={1}>{session.cwd ?? '~'}</Text>
-      </View>
-
-      {/* Actions */}
-      <View style={styles.actions}>
-        <TouchableOpacity
-          style={[styles.promptBtn, !canPrompt && styles.promptBtnDisabled]}
-          disabled={!canPrompt}
-          onPress={onPrompt}
-          activeOpacity={0.8}
-        >
-          <Ionicons
-            name="chatbubble-outline"
-            size={15}
-            color={canPrompt ? '#fff' : Colors.textTertiary}
-          />
-          <Text style={[styles.promptBtnText, !canPrompt && styles.promptBtnTextDisabled]}>
-            {session.pending_count > 0 ? 'Approvals pending' : 'Prompt'}
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity 
-          style={[styles.detailBtn, 
-          !canPrompt && styles.promptBtnDisabled]} 
-          onPress={onDetail} activeOpacity={0.7} 
-          disabled={!canPrompt}
-        >
-          
-          <Text style={styles.detailBtnText}>Detail  </Text>
-          <Ionicons
-            name="arrow-forward-outline"
-            size={15}
-            color={canPrompt ? '#fff' : Colors.textTertiary}
-          />
-        </TouchableOpacity>
-      </View>
-    </View>
+    </TouchableOpacity>
   )
 }
 
@@ -132,13 +93,14 @@ export function SessionsScreen() {
     return (
       <SessionCard
         session={item}
-        onDetail={() => navigation.navigate('SessionDetail', {
+        onOpen={() => navigation.navigate('Chat', {
           sessionId:       item.session_id,
           machineLabel:    item.machine_label,
           cwd:             item.cwd,
           machineIsOnline: item.machine_is_online,
+          harness:         (item.harness ?? 'claude-code') as any,
+          status:          item.status,
         })}
-        onPrompt={() => navigation.navigate('PromptCompose', { sessionId: item.session_id })}
       />
     )
   }
@@ -150,12 +112,9 @@ export function SessionsScreen() {
       <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
         <View>
           <Text style={styles.appName}>Vibe Remote</Text>
-          <Text style={styles.title}>Sessions</Text>
+          <Text style={styles.title}>Chats</Text>
         </View>
-        <View style={styles.liveIndicator}>
-          <View style={styles.liveDot} />
-          <Text style={styles.liveText}>live</Text>
-        </View>
+        <LiveBadge />
       </View>
 
       <FlatList
@@ -181,9 +140,8 @@ export function SessionsScreen() {
               </View>
               <Text style={styles.emptyTitle}>{'No sessions\nrunning.'}</Text>
               <Text style={styles.emptySub}>
-                Sessions appear once{' '}
-                <Text style={styles.code}>hook.js</Text>
-                {' '}intercepts a tool call.
+                Sessions appear once an agent intercepts a tool call.
+                Enable mobile support from the desktop app.
               </Text>
             </View>
           )
@@ -214,154 +172,104 @@ const styles = StyleSheet.create({
     color:         Colors.textTertiary,
     letterSpacing: 0.3,
   },
-  liveIndicator: {
-    flexDirection:     'row',
-    alignItems:        'center',
-    gap:               4,
-    backgroundColor:   Colors.surfaceGlassStrong,
-    borderRadius:      Radius.full,
-    paddingHorizontal: Spacing.px8,
-    paddingVertical:   4,
-    borderWidth:       1,
-    borderColor:       Colors.borderHairline,
-  },
-  liveDot: {
-    width:           8,
-    height:          8,
-    borderRadius:    Radius.full,
-    backgroundColor: Colors.accent,
-  },
-  liveText: {
-    fontSize:  FontSize.label,
-    color:     Colors.textSecondary,
-    fontStyle: 'italic',
-  },
   listContent: {
-    paddingHorizontal: Spacing.px20,
-    paddingTop:        Spacing.px4,
-    paddingBottom:     TAB_BOTTOM_INSET,
-    gap:               Spacing.px12,
+    paddingBottom: TAB_BOTTOM_INSET,
   },
 
   // Card
+  // Chat card (WhatsApp-style list item)
   card: {
-    backgroundColor: Colors.bgPrimary,
-    borderRadius:    Radius.md,
-    padding:         Spacing.px20,
-    gap:             Spacing.px16,
-    shadowColor:     '#A08060',
-    shadowOffset:    { width: 0, height: 6 },
-    shadowOpacity:   0.13,
-    shadowRadius:    20,
-    elevation:       5,
+    flexDirection:     'row',
+    alignItems:        'center',
+    gap:               Spacing.px12,
+    paddingVertical:   Spacing.px12,
+    paddingHorizontal: Spacing.px20,
+    backgroundColor:   Colors.bgPrimary,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.borderHairline,
   },
-  cardTop: {
+  avatar: {
+    width:          48,
+    height:         48,
+    borderRadius:   Radius.full,
+    backgroundColor: Colors.accentLight,
+    alignItems:     'center',
+    justifyContent: 'center',
+    borderWidth:    2,
+    flexShrink:     0,
+    position:       'relative',
+  },
+  avatarText: {
+    fontSize:   FontSize.cardTitle,
+    fontWeight: '700',
+    color:      Colors.accentDeep,
+    fontFamily: FontFamily.serifBold,
+  },
+  avatarDot: {
+    position:     'absolute',
+    bottom:       1,
+    right:        1,
+    width:        12,
+    height:       12,
+    borderRadius: Radius.full,
+    borderWidth:  2,
+    borderColor:  Colors.bgPrimary,
+  },
+  cardBody: { flex: 1, gap: 4 },
+  cardTopRow: {
     flexDirection:  'row',
     alignItems:     'center',
     justifyContent: 'space-between',
+    gap:            Spacing.px8,
   },
-  dotWrap: {
-    width:          8,
-    height:         8,
-    alignItems:     'center',
-    justifyContent: 'center',
-  },
-  dotPulse: {
-    position:     'absolute',
-    width:        8,
-    height:       8,
-    borderRadius: Radius.full,
-    opacity:      0.30,
-  },
-  dot: {
-    width:        7,
-    height:       7,
-    borderRadius: Radius.full,
-  },
-  statusPill: {
-    flexDirection:     'row',
-    alignItems:        'center',
-    gap:               6,
-    backgroundColor:   'rgba(0,0,0,0.06)',
-    borderRadius:      Radius.full,
-    paddingHorizontal: Spacing.px12,
-    paddingVertical:   6,
-  },
-  statusText: {
-    fontSize:   FontSize.label,
-    fontWeight: '500',
-    color:      Colors.textSecondary,
-  },
-  cardTitle: {
-    fontSize:      20,
-    fontFamily:    FontFamily.serif,
-    color:         Colors.textPrimary,
-    letterSpacing: -0.3,
-    lineHeight:    26,
-  },
-  pathRow: {
-    flexDirection:     'row',
-    alignItems:        'center',
-    gap:               Spacing.px8,
-    backgroundColor:   'rgba(0,0,0,0.04)',
-    borderRadius:      Radius.sm,
-    paddingHorizontal: Spacing.px12,
-    paddingVertical:   Spacing.px8,
-  },
-  pathText: {
-    fontFamily: FontFamily.mono,
-    fontSize:   FontSize.monoSmall,
-    color:      Colors.textSecondary,
-    flex:       1,
-  },
-  actions: {
+  cardTitleRow: {
     flexDirection: 'row',
     alignItems:    'center',
-    gap:           Spacing.px12,
-    marginTop:     Spacing.px4,
+    gap:           Spacing.px8,
+    flex:          1,
   },
-  promptBtn: {
-    flex:           1,
+  cardTitle: {
+    fontSize:   FontSize.cardTitle,
+    fontWeight: '600',
+    color:      Colors.textPrimary,
+    flexShrink: 1,
+  },
+  timeText: {
+    fontSize:  FontSize.metadata,
+    color:     Colors.textTertiary,
+    flexShrink: 0,
+  },
+  cardBottomRow: {
     flexDirection:  'row',
     alignItems:     'center',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
     gap:            Spacing.px8,
-    height:         48,
-    borderRadius:   Radius.full,
-    backgroundColor: Colors.accentDeep,
-    shadowColor:    Colors.accentDeep,
-    shadowOffset:   { width: 0, height: 4 },
-    shadowOpacity:  0.35,
-    shadowRadius:   12,
-    elevation:      4,
   },
-  promptBtnDisabled: {
-    backgroundColor: 'rgba(0,0,0,0.06)',
-    shadowOpacity:   0,
-    elevation:       0,
+  cardMeta: {
+    flexDirection: 'row',
+    alignItems:    'center',
+    gap:           5,
+    flex:          1,
   },
-  promptBtnText: {
-    fontSize:   FontSize.label,
-    fontWeight: '600',
-    color:      '#FFFFFF',
+  statusDot: { width: 6, height: 6, borderRadius: Radius.full },
+  statusLabel: { fontSize: FontSize.metadata, fontWeight: '500' },
+  metaSep: { fontSize: FontSize.metadata, color: Colors.textTertiary },
+  machineText: {
+    fontSize:  FontSize.metadata,
+    color:     Colors.textTertiary,
+    flex:      1,
   },
-  promptBtnTextDisabled: {
-    color: Colors.textTertiary,
+  badge: {
+    backgroundColor:   Colors.danger,
+    borderRadius:      Radius.full,
+    minWidth:          20,
+    height:            20,
+    alignItems:        'center',
+    justifyContent:    'center',
+    paddingHorizontal: 4,
+    flexShrink:        0,
   },
-  detailBtn: {
-    flex:           1,
-    flexDirection:  'row',
-    alignItems:     'center',
-    justifyContent: 'center',
-    height:         48,
-    borderRadius:   Radius.full,
-    borderColor:    'rgba(0,0,0,0.12)',
-  },
-  detailBtnText: {
-    fontSize:   FontSize.label,
-    fontWeight: '600',
-    color:      Colors.textSecondary,
-  },
+  badgeText: { fontSize: 10, fontWeight: '700', color: Colors.white },
 
   // Empty
   emptyContainer: { flexGrow: 1, justifyContent: 'center', alignItems: 'center' },

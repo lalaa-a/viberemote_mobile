@@ -132,10 +132,20 @@ function StopRow({ item }: { item: TerminalEvent }) {
   )
 }
 
+// ── PTY output row ─────────────────────────────────────────────────────────────
+function OutputRow({ item }: { item: TerminalEvent }) {
+  return (
+    <View style={styles.outputRow}>
+      <Text style={styles.outputText} selectable>{item.summary}</Text>
+    </View>
+  )
+}
+
 // ── Event dispatcher ───────────────────────────────────────────────────────────
 function EventRow({ item }: { item: TerminalEvent }) {
   if (item.event_type === 'notification') return <NotificationRow item={item} />
   if (item.event_type === 'stop')         return <StopRow item={item} />
+  if (item.event_type === 'output')       return <OutputRow item={item} />
   return <ToolRow item={item} />
 }
 
@@ -182,6 +192,7 @@ export function TerminalScreen() {
       </View>
 
       {/* Session picker — always rendered to keep header position stable */}
+      <View style={styles.sessionPickerWrap}>
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -212,6 +223,7 @@ export function TerminalScreen() {
           <Text style={styles.noSessionText}>No active sessions</Text>
         )}
       </ScrollView>
+      </View>
 
       {/* Session banner — always rendered to keep layout stable */}
       <View style={styles.banner}>
@@ -273,6 +285,7 @@ const styles = StyleSheet.create({
     justifyContent:    'space-between',
     paddingHorizontal: Spacing.px20,
     paddingBottom:     Spacing.px12,
+    flexShrink:        0,
   },
   appName: {
     fontSize:   28,
@@ -311,6 +324,10 @@ const styles = StyleSheet.create({
   },
 
   // Session picker
+  sessionPickerWrap: {
+    minHeight:  48,
+    flexShrink: 0,
+  },
   sessionPicker: {
     flexDirection:     'row',
     paddingHorizontal: Spacing.px20,
@@ -318,7 +335,6 @@ const styles = StyleSheet.create({
     paddingBottom:     Spacing.px8,
     gap:               Spacing.px8,
     alignItems:        'center',
-    minHeight:         48,
   },
   noSessionText: {
     fontSize:  FontSize.label,
@@ -383,6 +399,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.px20,
     paddingBottom:     Spacing.px8,
     minHeight:         24,
+    flexShrink:        0,
   },
   bannerDot: {
     width:        6,
@@ -514,6 +531,21 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     lineHeight: 18,
     flex:      1,
+  },
+
+  // Output row (PTY capture)
+  outputRow: {
+    paddingHorizontal: Spacing.px20,
+    paddingVertical:   Spacing.px4,
+    borderLeftWidth:   2,
+    borderLeftColor:   Colors.borderHairline,
+    marginLeft:        Spacing.px20,
+  },
+  outputText: {
+    fontFamily: FontFamily.mono,
+    fontSize:   FontSize.monoSmall,
+    color:      Colors.textTertiary,
+    lineHeight: 17,
   },
 
   // Stop row

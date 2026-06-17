@@ -76,13 +76,25 @@ export function FileBrowserScreen() {
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Use in prompt',
-        onPress: () => navigation.navigate('PromptCompose', {
-          sessionId,
-          prefill: `Look at ${node.path} and `,
-        }),
+        onPress: () => {
+          // Navigate back to Chat and set prefill so the compose bar is populated.
+          // merge:true updates the existing Chat screen in the stack without
+          // pushing a new one, so the back button still works correctly.
+          navigation.navigate('Chat', {
+            ...route.params,
+            // FileBrowser params subset — Chat requires these at minimum:
+            sessionId:       route.params.sessionId,
+            machineLabel:    route.params.machineLabel,
+            cwd:             route.params.cwd,
+            machineIsOnline: true,
+            harness:         'claude-code' as any,
+            status:          'idle' as any,
+            prefill:         `Look at ${node.path} and `,
+          } as any)
+        },
       },
     ])
-  }, [sessionId, navigation])
+  }, [navigation])
 
   const flatItems = tree ? flattenTree(tree, 0, expanded) : []
 

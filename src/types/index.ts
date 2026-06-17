@@ -1,6 +1,7 @@
 export type RiskLevel    = 'low' | 'medium' | 'high' | 'critical'
-export type ToolName     = 'Bash' | 'Write' | 'Edit' | 'MultiEdit' | 'Read'
-export type DisplayType  = 'bash' | 'write' | 'edit' | 'multi_edit' | 'read' | 'unknown'
+export type ToolName     = 'Bash' | 'Write' | 'Edit' | 'MultiEdit' | 'Read' | 'bash' | 'edit' | 'write' | 'patch' | 'unknown'
+export type DisplayType  = 'bash' | 'write' | 'edit' | 'multi_edit' | 'read' | 'command' | 'unknown'
+export type HarnessId    = 'claude-code' | 'opencode' | 'gemini-cli' | (string & {})
 export type RequestStatus =
   | 'pending'
   | 'approved'
@@ -46,6 +47,7 @@ export interface PendingRequest {
   user_id:        string
   machine_id:     string
   session_id:     string | null
+  harness:        HarnessId
   tool_name:      ToolName
   display_type:   DisplayType
   summary:        string
@@ -87,10 +89,34 @@ export interface AgentSession {
   machine_is_online: boolean
   session_id:        string
   cwd:               string | null
+  harness:           HarnessId
+  cli_alive:         boolean        // false = the CLI window was closed
   status:            SessionStatus
   pending_count:     number
   last_activity_at:  string
   started_at:        string
+}
+
+// ── Harness state (read from /harness/:machineId) ─────────────────────────────
+
+export interface HarnessCapabilities {
+  approvals:         boolean
+  narrative:         boolean
+  injection:         boolean
+  fileTree:          boolean
+  sessionList:       boolean
+  approvalMechanism: 'hook' | 'plugin' | 'mcp' | 'pty-proxy' | 'api' | 'none'
+}
+
+export interface MachineHarness {
+  harness:         HarnessId
+  display_name:    string
+  installed:       boolean
+  mobile_enabled:  boolean
+  desired_enabled: boolean | null
+  capabilities:    HarnessCapabilities
+  version:         string | null
+  updated_at:      string
 }
 
 export interface MobileCommand {
@@ -110,6 +136,23 @@ export interface FsNode {
   children?: FsNode[] | null
 }
 
+// ── Paginated chat feed (GET /mobile/sessions/:id/feed) ─────────────────────────
+// One unified, time-ordered stream merging the three feed sources server-side.
+export type FeedSource = 'terminal' | 'request' | 'prompt'
+
+export interface FeedRow {
+  source:     FeedSource
+  id:         string
+  created_at: string
+  row:        TerminalEvent | PendingRequest | MobileCommand
+}
+
+export interface FeedPage {
+  items:      FeedRow[]      // ascending by created_at within the page
+  nextCursor: string | null  // pass as `before` to fetch older; null = no more
+  hasMore:    boolean
+}
+
 // ── Navigation param types ─────────────────────────────────────────────────────
 import type { NavigatorScreenParams } from '@react-navigation/native'
 export type { NavigatorScreenParams }
@@ -120,17 +163,17 @@ export type RootStackParamList = {
 }
 
 export type TabParamList = {
-  RequestsTab:  NavigatorScreenParams<RequestsStackParamList> | undefined
-  SessionsTab:  NavigatorScreenParams<SessionsStackParamList> | undefined
-  MachinesTab:  undefined
-  TerminalTab:  undefined
+  RequestsTab: NavigatorScreenParams<RequestsStackParamList> | undefined
+  ChatsTab:    NavigatorScreenParams<SessionsStackParamList> | undefined
+  MachinesTab: undefined
 }
 
 export interface TerminalEvent {
   id:         string
   session_id: string
   machine_id: string
-  event_type: 'tool_start' | 'tool_end' | 'notification' | 'stop'
+  harness:    HarnessId
+  event_type: 'tool_start' | 'tool_end' | 'notification' | 'stop' | 'output'
   tool_name:  string | null
   summary:    string | null
   detail:     string | null
@@ -144,9 +187,16 @@ export type RequestsStackParamList = {
 }
 
 export type SessionsStackParamList = {
-  SessionsList:  undefined
-  SessionDetail: { sessionId: string; machineLabel: string; cwd: string | null; machineIsOnline: boolean }
+  ChatsList:    undefined
+  Chat:         {
+    sessionId:       string
+    machineLabel:    string
+    cwd:             string | null
+    machineIsOnline: boolean
+    harness:         HarnessId
+    status:          SessionStatus
+    prefill?:        string
+  }
   RequestDetail: { id: string }
   FileBrowser:   { sessionId: string; machineLabel: string; cwd: string | null }
-  PromptCompose: { sessionId: string; prefill?: string }
 }
