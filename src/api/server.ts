@@ -1,80 +1,113 @@
 import { createMMKV } from 'react-native-mmkv'
-import type { Machine, PendingRequest, AgentSession, MobileCommand, FsNode, TerminalEvent, MachineHarness, FeedPage } from '../types'
+import Config from 'react-native-config'
+import { useAppStore } from '../store/useAppStore'
+import { getDeviceId, saveDeviceId } from './device'
+import type {
+  Machine, PendingRequest, AgentSession, MobileCommand,
+  FsNode, TerminalEvent, MachineHarness, FeedPage, Profile, MobileDevice,
+  SelectedAnswer,
+} from '../types'
 
-const storage = createMMKV({ id: 'machine-credentials' })
+// One-time wipe of the legacy machine-credentials MMKV store (fresh-start decision)
+createMMKV({ id: 'machine-credentials' }).clearAll()
 
-export interface MachineCredentials {
-  machineId:   string
-  apiKey:      string
-  supabaseUrl: string
-  apiUrl:      string
-}
+// ── Auth headers ───────────────────────────────────────────────────────────────
+// Read the access token from the in-memory Zustand store (sync, no async stampede).
+// supabase-js refreshes it in the background via onAuthStateChange.
+function authHeaders(): Record<string, string> {
+  const token = useAppStore.getState().session?.access_token
+  if (!token) throw new Error('Not authenticated')
 
-// ── Credential storage ─────────────────────────────────────────────────────────
-
-export function getCredentials(): MachineCredentials | null {
-  const raw = storage.getString('credentials')
-  if (!raw) return null
-  try { return JSON.parse(raw) } catch { return null }
-}
-
-export function saveCredentials(creds: MachineCredentials): void {
-  storage.set('credentials', JSON.stringify(creds))
-}
-
-export function clearCredentials(): void {
-  storage.remove('credentials')
-}
-
-// ── HTTP helpers ───────────────────────────────────────────────────────────────
-
-function getHeaders(apiKey: string): Record<string, string> {
-  return {
-    'Content-Type':      'application/json',
-    'x-machine-api-key': apiKey,
+  const h: Record<string, string> = {
+    'Content-Type':  'application/json',
+    'Authorization': `Bearer ${token}`,
   }
+
+  const deviceId = getDeviceId()
+  if (deviceId) h['x-device-id'] = deviceId
+  return h
 }
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const creds = getCredentials()
-  if (!creds) throw new Error('Not authenticated')
+function apiBase(): string {
+  return Config.API_URL ?? ''
+}
 
-  const url = `${creds.apiUrl}${path}`
+// ── Core request helper ────────────────────────────────────────────────────────
+async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const url = `${apiBase()}${path}`
   const res  = await fetch(url, {
     ...options,
-    headers: { ...getHeaders(creds.apiKey), ...(options?.headers ?? {}) },
+    headers: { ...authHeaders(), ...(options?.headers ?? {}) },
   })
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
-    throw new Error((err as any).error ?? `Request failed (${res.status})`)
+    throw Object.assign(
+      new Error((err as any).error ?? `Request failed (${res.status})`),
+      { code: (err as any).code, status: res.status }
+    )
   }
 
   return res.json() as Promise<T>
 }
 
-// ── Auth ───────────────────────────────────────────────────────────────────────
+// ── Device registration ────────────────────────────────────────────────────────
+export async function registerDevice(deviceName: string, platform: string): Promise<string> {
+  const { data: { session } } = await (await import('./supabase')).supabase.auth.getSession()
+  if (!session?.access_token) throw new Error('Not authenticated')
 
-export async function verifyCredentials(creds: MachineCredentials): Promise<Machine> {
-  const res = await fetch(`${creds.apiUrl}/mobile/machine`, {
-    headers: getHeaders(creds.apiKey),
+  const res = await fetch(`${apiBase()}/machines/devices`, {
+    method:  'POST',
+    headers: {
+      'Content-Type':  'application/json',
+      'Authorization': `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({ deviceName, platform }),
   })
-  if (!res.ok) throw new Error('Invalid credentials — scan the QR again.')
-  return res.json() as Promise<Machine>
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error((err as any).error ?? 'Device registration failed')
+  }
+  const { deviceId } = await res.json()
+  saveDeviceId(deviceId)
+  useAppStore.getState().setDeviceId(deviceId)
+  return deviceId
+}
+
+// List the devices registered to the signed-in user. Used to validate that a
+// locally-cached deviceId still exists server-side (it won't after a DB reset).
+export function fetchDevices(): Promise<Array<{ id: string; device_name: string; platform: string }>> {
+  return request<Array<{ id: string; device_name: string; platform: string }>>('/machines/devices')
+}
+
+// ── Pairing ────────────────────────────────────────────────────────────────────
+export function pairMachine(
+  machineId: string,
+  apiKey:    string,
+  deviceId:  string,
+  challenge: string,
+): Promise<{ ok: boolean; alreadyPaired?: boolean }> {
+  const token = useAppStore.getState().session?.access_token
+  if (!token) throw new Error('Not authenticated')
+
+  return fetch(`${apiBase()}/machines/${machineId}/pair`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body:    JSON.stringify({ apiKey, deviceId, challenge }),
+  }).then(async res => {
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) throw Object.assign(new Error((body as any).error ?? 'Pair failed'), { code: (body as any).code, status: res.status })
+    return body
+  })
+}
+
+export function unpairMachine(machineId: string): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>(`/machines/${machineId}/pair`, { method: 'DELETE' })
 }
 
 // ── Requests ───────────────────────────────────────────────────────────────────
-
-export function fetchPendingRequests(): Promise<PendingRequest[]> {
-  return request<PendingRequest[]>('/mobile/requests')
-}
-
 export function fetchRequestById(id: string): Promise<PendingRequest> {
   return request<PendingRequest>(`/mobile/requests/${id}`)
-}
-
-export function fetchHistory(limit = 50): Promise<PendingRequest[]> {
-  return request<PendingRequest[]>(`/mobile/history?limit=${limit}`)
 }
 
 export function decideRequest(
@@ -87,14 +120,27 @@ export function decideRequest(
   })
 }
 
-// ── Machines ───────────────────────────────────────────────────────────────────
+// Submit the chosen option(s) for a kind='question' request (AskUserQuestion).
+export function answerRequest(
+  requestId: string,
+  answers:   SelectedAnswer[]
+): Promise<void> {
+  return request<void>('/mobile/answer', {
+    method: 'POST',
+    body:   JSON.stringify({ requestId, answers }),
+  })
+}
 
+// ── Machines ───────────────────────────────────────────────────────────────────
 export function fetchMachines(): Promise<Machine[]> {
   return request<Machine[]>('/mobile/machines')
 }
 
-// ── Push tokens ────────────────────────────────────────────────────────────────
+export function deleteMachine(machineId: string): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>(`/machines/${machineId}`, { method: 'DELETE' })
+}
 
+// ── Push tokens ────────────────────────────────────────────────────────────────
 export function registerPushToken(token: string, platform: string): Promise<void> {
   return request<void>('/mobile/push-token', {
     method: 'POST',
@@ -103,39 +149,28 @@ export function registerPushToken(token: string, platform: string): Promise<void
 }
 
 // ── Sessions ───────────────────────────────────────────────────────────────────
-
 export function fetchSessions(): Promise<AgentSession[]> {
   return request<AgentSession[]>('/mobile/sessions')
 }
 
-/** Pending requests only — used by the approval list. */
 export function fetchSessionRequests(sessionId: string): Promise<PendingRequest[]> {
   return request<PendingRequest[]>(`/mobile/sessions/${encodeURIComponent(sessionId)}/requests?pending=true`)
 }
 
-/** All requests (any status) for a session — used by the chat feed. */
 export function fetchSessionAllRequests(sessionId: string): Promise<PendingRequest[]> {
   return request<PendingRequest[]>(`/mobile/sessions/${encodeURIComponent(sessionId)}/requests`)
 }
 
-/**
- * Unified, cursor-paginated chat feed for a session (WhatsApp/Telegram style).
- * Pass `before` (an ISO timestamp = the previous page's nextCursor) to load
- * older history; omit it for the most-recent page.
- */
 export function fetchSessionFeed(
   sessionId: string,
   opts: { before?: string; limit?: number } = {},
 ): Promise<FeedPage> {
   const params = new URLSearchParams({ limit: String(opts.limit ?? 40) })
   if (opts.before) params.set('before', opts.before)
-  return request<FeedPage>(
-    `/mobile/sessions/${encodeURIComponent(sessionId)}/feed?${params}`,
-  )
+  return request<FeedPage>(`/mobile/sessions/${encodeURIComponent(sessionId)}/feed?${params}`)
 }
 
 // ── Prompt injection ───────────────────────────────────────────────────────────
-
 export function sendPrompt(prompt: string, sessionId?: string): Promise<{ id: string }> {
   return request<{ id: string }>('/mobile/prompt', {
     method: 'POST',
@@ -152,7 +187,6 @@ export function cancelPrompt(id: string): Promise<void> {
 }
 
 // ── Terminal events ────────────────────────────────────────────────────────────
-
 export function fetchTerminalEvents(sessionId?: string, limit = 60): Promise<{ events: TerminalEvent[] }> {
   const params = new URLSearchParams({ limit: String(limit) })
   if (sessionId) params.set('session_id', sessionId)
@@ -160,11 +194,7 @@ export function fetchTerminalEvents(sessionId?: string, limit = 60): Promise<{ e
 }
 
 // ── File tree ──────────────────────────────────────────────────────────────────
-
-export function requestFileTree(
-  path: string,
-  sessionId?: string
-): Promise<{ requestId: string }> {
+export function requestFileTree(path: string, sessionId?: string): Promise<{ requestId: string }> {
   return request<{ requestId: string }>('/mobile/fs/request', {
     method: 'POST',
     body:   JSON.stringify({ path, sessionId }),
@@ -179,47 +209,37 @@ export function pollFileTreeResult(requestId: string): Promise<{
   return request(`/mobile/fs/result/${requestId}`)
 }
 
-// ── Harness state (user-authed — reads /harness/:machineId) ───────────────────
-// The harness routes are authenticated with the Supabase user JWT (not machine
-// API key) because the phone is reading per-machine state by ownership, not by
-// being the machine. We lazy-import supabase here to avoid a circular dep.
-
-async function userAuthHeader(): Promise<Record<string, string>> {
-  const { supabase } = await import('./supabase')
-  const { data: { session } } = await supabase.auth.getSession()
-  if (!session?.access_token) throw new Error('Not authenticated')
-  return { 'Authorization': `Bearer ${session.access_token}`, 'Content-Type': 'application/json' }
+// ── Harness state ──────────────────────────────────────────────────────────────
+export function fetchHarnessState(machineId: string): Promise<MachineHarness[]> {
+  return request<MachineHarness[]>(`/harness/${machineId}`)
 }
 
-function apiBase(): string {
-  const creds = getCredentials()
-  if (!creds) throw new Error('Not authenticated')
-  return creds.apiUrl
-}
-
-export async function fetchHarnessState(machineId: string): Promise<MachineHarness[]> {
-  const headers = await userAuthHeader()
-  const res = await fetch(`${apiBase()}/harness/${machineId}`, { headers })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({})) as any
-    throw new Error(err.error ?? `fetchHarnessState failed (${res.status})`)
-  }
-  return res.json() as Promise<MachineHarness[]>
-}
-
-export async function desireHarnessToggle(
-  machineId: string,
-  harness:   string,
-  enabled:   boolean,
-): Promise<void> {
-  const headers = await userAuthHeader()
-  const res = await fetch(`${apiBase()}/harness/${machineId}/desire`, {
-    method:  'POST',
-    headers,
-    body:    JSON.stringify({ harness, enabled }),
+export function desireHarnessToggle(machineId: string, harness: string, enabled: boolean): Promise<void> {
+  return request<void>(`/harness/${machineId}/desire`, {
+    method: 'POST',
+    body:   JSON.stringify({ harness, enabled }),
   })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({})) as any
-    throw new Error(err.error ?? `desireHarnessToggle failed (${res.status})`)
-  }
+}
+
+// ── Profile ────────────────────────────────────────────────────────────────────
+export function fetchProfile(): Promise<Profile> {
+  return request<Profile>('/profile')
+}
+
+export function updateProfile(patch: Partial<Pick<Profile, 'display_name' | 'avatar_url'>>): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>('/profile', {
+    method: 'PATCH',
+    body:   JSON.stringify(patch),
+  })
+}
+
+export function changePassword(newPassword: string): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>('/profile/password', {
+    method: 'POST',
+    body:   JSON.stringify({ newPassword }),
+  })
+}
+
+export function deleteAccount(): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>('/profile', { method: 'DELETE' })
 }

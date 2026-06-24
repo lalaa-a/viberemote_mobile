@@ -13,15 +13,19 @@ import { formatDistanceToNow } from 'date-fns'
 import Ionicons from 'react-native-vector-icons/Ionicons'
 import { useChatFeed } from '../../hooks/useChatFeed'
 import type { ChatItem } from '../../hooks/useChatFeed'
-import { useDecideRequest } from '../../hooks/useRequests'
+import { useDecideRequest, useAnswerRequest } from '../../hooks/useRequests'
 import { useSendPrompt, useSessions } from '../../hooks/useSessions'
+import { useMachineChannel } from '../../hooks/useMachineChannel'
 import { GradientBackground } from '../../components/GradientBackground'
 import { RiskBadge } from '../../components/RiskBadge'
 import { HarnessBadge } from '../../components/HarnessBadge'
+import { QuestionCard } from '../../components/QuestionCard'
 import {
   Colors, Spacing, Radius, FontSize, FontFamily, Shadow, TAB_BOTTOM_INSET,
 } from '../../constants/colors'
-import type { SessionsStackParamList, PendingRequest, TerminalEvent, MobileCommand } from '../../types'
+import type {
+  SessionsStackParamList, PendingRequest, TerminalEvent, MobileCommand, SelectedAnswer,
+} from '../../types'
 
 type Route = RouteProp<SessionsStackParamList, 'Chat'>
 type Nav   = NativeStackNavigationProp<SessionsStackParamList>
@@ -115,19 +119,27 @@ function StopRow({ event }: { event: TerminalEvent }) {
 }
 
 // ── Tool approval card ────────────────────────────────────────────────────────
-function RequestCard({ req, onApprove, onDeny }: {
+function RequestCard({ req, onApprove, onDeny, onOpen }: {
   req:       PendingRequest
   onApprove: () => void
   onDeny:    () => void
+  onOpen:    () => void
 }) {
   const riskCfg  = Colors.risk[req.risk_level] ?? Colors.risk.low
   const toolCfg  = Colors.tool[req.tool_name as keyof typeof Colors.tool] ?? Colors.tool.unknown
   const iconName = TOOL_ICONS[req.tool_name as string] ?? 'cube-outline'
   const isPending  = req.status === 'pending'
   const isApproved = req.status === 'approved'
+  // Tapping the card opens the full detail/diff screen — but only when there's
+  // something worth inspecting (a diff, a command, or affected files).
+  const canInspect = !!req.diff || !!req.command || (req.files_affected?.length ?? 0) > 0
 
   return (
-    <View style={[styles.reqCard, { borderLeftColor: riskCfg.dot }]}>
+    <TouchableOpacity
+      style={[styles.reqCard, { borderLeftColor: riskCfg.dot }]}
+      activeOpacity={canInspect ? 0.85 : 1}
+      onPress={canInspect ? onOpen : undefined}
+    >
       <View style={[styles.reqWhisper, { backgroundColor: riskCfg.whisper }]} />
 
       {/* Tool + risk header */}
@@ -164,7 +176,19 @@ function RequestCard({ req, onApprove, onDeny }: {
         </View>
       )}
 
-      {/* Action buttons (only while pending) */}
+      {/* Tap-to-inspect hint (full diff / details live on RequestDetail) */}
+      {canInspect && (
+        <View style={styles.reqOpenHint}>
+          <Ionicons name="document-text-outline" size={12} color={Colors.textTertiary} />
+          <Text style={styles.reqOpenHintText}>
+            {req.diff ? 'View full diff' : 'View details'}
+          </Text>
+          <Ionicons name="chevron-forward" size={12} color={Colors.textTertiary} />
+        </View>
+      )}
+
+      {/* Action buttons (only while pending). Their own onPress stops the tap from
+          bubbling to the card's onPress, so Approve/Deny never navigates. */}
       {isPending && (
         <View style={styles.reqActions}>
           <TouchableOpacity style={styles.denyBtn} onPress={onDeny} activeOpacity={0.8}>
@@ -181,7 +205,7 @@ function RequestCard({ req, onApprove, onDeny }: {
       <Text style={styles.reqTime}>
         {formatDistanceToNow(new Date(req.created_at), { addSuffix: true })}
       </Text>
-    </View>
+    </TouchableOpacity>
   )
 }
 
@@ -233,21 +257,28 @@ function ActivityBubble({ event }: { event: TerminalEvent }) {
 // actually changed — not every visible bubble. `onApprove`/`onDeny` are stable
 // (useCallback in the screen) and item objects are reused across renders, so the
 // default shallow prop compare is enough.
-const FeedRow = React.memo(function FeedRow({ item, onApprove, onDeny }: {
+const FeedRow = React.memo(function FeedRow({ item, onApprove, onDeny, onOpen, onAnswer }: {
   item:      ChatItem
   onApprove: (id: string) => void
   onDeny:    (id: string) => void
+  onOpen:    (id: string) => void
+  onAnswer:  (id: string, answers: SelectedAnswer[]) => void
 }) {
   if (item.kind === 'output')   return <OutputBubble  event={item.event} />
   if (item.kind === 'activity') return <ActivityBubble event={item.event} />
   if (item.kind === 'sent')     return <SentBubble    cmd={item.cmd} />
   if (item.kind === 'notify')   return <NotifyRow     event={item.event} />
   if (item.kind === 'stop')     return <StopRow       event={item.event} />
+  // request row — questions render the QuestionCard, approvals the existing card
+  if (item.req.kind === 'question') {
+    return <QuestionCard request={item.req} onSubmit={(answers) => onAnswer(item.req.id, answers)} />
+  }
   return (
     <RequestCard
       req={item.req}
       onApprove={() => onApprove(item.req.id)}
       onDeny={()    => onDeny(item.req.id)}
+      onOpen={()    => onOpen(item.req.id)}
     />
   )
 })
@@ -261,6 +292,7 @@ export function ChatScreen() {
 
   const { feed, isLoading, isRefetching, fetchOlder, isFetchingOlder } = useChatFeed(sessionId)
   const decide  = useDecideRequest()
+  const answer  = useAnswerRequest()
   const sendPmt = useSendPrompt()
 
   // Live session data — route.params.status / machineIsOnline are stale snapshots
@@ -275,6 +307,14 @@ export function ChatScreen() {
   // AND it isn't currently active. Active sessions are never blocked (avoids a
   // false-block in the brief window before the first liveness report).
   const cliClosed      = liveSession?.cli_alive === false && liveStatus !== 'active'
+  // Mobile support for this harness is off on the desktop — the desktop hasn't
+  // installed the hooks that inject prompts, so sending would go nowhere. Only
+  // block on a confirmed `false` (undefined = unknown → let the server decide).
+  const harnessOff     = liveSession?.harness_enabled === false
+
+  // Instant composer lock/unlock when this session's harness is toggled on the
+  // desktop, instead of waiting for the next 10s sessions poll.
+  useMachineChannel(liveSession?.machine_id)
 
   const [prompt, setPrompt] = useState(prefill ?? '')
   const listRef = useRef<FlatList>(null)
@@ -321,6 +361,20 @@ export function ChatScreen() {
 
   const handleApprove = useCallback((id: string) => decide.mutate({ id, decision: 'approved' }), [decide])
   const handleDeny    = useCallback((id: string) => decide.mutate({ id, decision: 'denied'   }), [decide])
+  const handleOpen    = useCallback((id: string) => navigation.navigate('RequestDetail', { id }), [navigation])
+  const handleAnswer  = useCallback(
+    (id: string, answers: SelectedAnswer[]) => answer.mutate({ id, answers }),
+    [answer],
+  )
+
+  // Stable renderItem so ChatScreen re-renders (every feed update, prompt keypress,
+  // scroll tick) don't hand FlatList a new function and re-render visible cells.
+  const renderItem = useCallback(
+    ({ item }: { item: ChatItem }) => (
+      <FeedRow item={item} onApprove={handleApprove} onDeny={handleDeny} onOpen={handleOpen} onAnswer={handleAnswer} />
+    ),
+    [handleApprove, handleDeny, handleOpen, handleAnswer],
+  )
 
   async function handleSend() {
     const text = prompt.trim()
@@ -337,7 +391,7 @@ export function ChatScreen() {
   // Allow prompting when the machine is online, no approvals pending, and the CLI
   // is still open. A closed CLI is blocked — resuming it would spawn a new
   // unattended agent, which is dangerous.
-  const canType  = liveOnline && pendingCount === 0 && !cliClosed
+  const canType  = liveOnline && pendingCount === 0 && !cliClosed && !harnessOff
   const canSend  = prompt.trim().length > 0 && !sendPmt.isPending && canType
 
   return (
@@ -411,9 +465,7 @@ export function ChatScreen() {
             style={styles.flex}
             data={feed}
             keyExtractor={item => item.id}
-            renderItem={({ item }) => (
-              <FeedRow item={item} onApprove={handleApprove} onDeny={handleDeny} />
-            )}
+            renderItem={renderItem}
             contentContainerStyle={[
               styles.listContent,
               feed.length === 0 && styles.listContentEmpty,
@@ -489,6 +541,18 @@ export function ChatScreen() {
                 <Text style={styles.closedSub}>
                   This session's terminal was closed. Start the agent again on your
                   computer to continue — prompts can't be sent to a closed CLI.
+                </Text>
+              </View>
+            </View>
+          ) : harnessOff ? (
+            // Mobile support for this harness is toggled off on the desktop
+            <View style={styles.harnessOffNote}>
+              <Ionicons name="power" size={16} color={Colors.warning} />
+              <View style={styles.closedTextWrap}>
+                <Text style={[styles.closedTitle, { color: Colors.warning }]}>Mobile support is off</Text>
+                <Text style={styles.closedSub}>
+                  Turn on mobile support for {harness} in the Vibe Remote desktop app
+                  to send prompts to this session.
                 </Text>
               </View>
             </View>
@@ -729,6 +793,12 @@ const styles = StyleSheet.create({
     fontFamily: FontFamily.mono, fontSize: FontSize.monoSmall,
     color: Colors.codeText, lineHeight: 17,
   },
+  reqOpenHint: {
+    flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2,
+  },
+  reqOpenHintText: {
+    flex: 1, fontSize: FontSize.metadata, color: Colors.textTertiary, fontWeight: '500',
+  },
   reqActions: {
     flexDirection: 'row', gap: Spacing.px8, marginTop: Spacing.px4,
   },
@@ -811,6 +881,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.px8,
     paddingVertical: Spacing.px12, paddingHorizontal: Spacing.px8,
     backgroundColor: Colors.dangerLight + '55', borderRadius: Radius.md,
+  },
+  harnessOffNote: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.px8,
+    paddingVertical: Spacing.px12, paddingHorizontal: Spacing.px8,
+    backgroundColor: Colors.warning + '1A', borderRadius: Radius.md,
   },
   closedTextWrap: { flex: 1, gap: 2 },
   closedTitle: { fontSize: FontSize.label, color: Colors.danger, fontWeight: '700' },

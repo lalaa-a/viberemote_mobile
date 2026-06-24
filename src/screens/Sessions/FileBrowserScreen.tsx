@@ -50,7 +50,7 @@ export function FileBrowserScreen() {
     if (!tree) return
     const topDirs = tree.filter(n => n.type === 'dir').map(n => n.path)
     setExpanded(new Set(topDirs))
-  }, [tree !== null])
+  }, [tree !== null] )
 
   const handleNodePress = useCallback(async (item: FlatItem) => {
     const { node } = item

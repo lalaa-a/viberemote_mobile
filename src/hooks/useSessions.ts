@@ -12,7 +12,10 @@ export function useSessions() {
     queryKey:        ['sessions'],
     queryFn:         fetchSessions,
     staleTime:       0,
-    refetchInterval: 10_000,
+    // Realtime (useSessionsRealtime) is the instant path — new sessions, status
+    // transitions, and pending_count all push and invalidate this query. This poll
+    // is now only a reconnect backstop.
+    refetchInterval: 15_000,
   })
 }
 

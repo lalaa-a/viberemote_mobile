@@ -1,21 +1,23 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js'
-import { getCredentials } from './server'
+import Config from 'react-native-config'
+import { useAppStore } from '../store/useAppStore'
 
-// Singleton Supabase client used only for Realtime subscriptions.
-// Created on demand once we have a JWT from the server.
 let client:       SupabaseClient | null = null
 let currentToken: string | null         = null
 
 export async function getRealtimeClient(): Promise<SupabaseClient | null> {
-  const creds = getCredentials()
-  if (!creds) return null
+  const session = useAppStore.getState().session
+  if (!session) return null
 
   if (client && currentToken) return client
 
   try {
-    const res = await fetch(`${creds.apiUrl}/mobile/realtime-token`, {
+    const res = await fetch(`${Config.API_URL}/mobile/realtime-token`, {
       method:  'POST',
-      headers: { 'x-machine-api-key': creds.apiKey },
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': `Bearer ${session.access_token}`,
+      },
     })
     if (!res.ok) {
       console.warn('[realtime] token fetch failed', res.status)
@@ -23,11 +25,17 @@ export async function getRealtimeClient(): Promise<SupabaseClient | null> {
     }
     const { token } = (await res.json()) as { token: string }
 
-    // Pass the JWT as the apiKey — Supabase accepts this for authenticated clients.
-    // setAuth also tells the Realtime socket to use it for channel subscriptions.
-    client = createClient(creds.supabaseUrl, token, {
+    // The client key MUST be the anon key — on self-hosted Supabase the Realtime
+    // WebSocket connects through the Kong gateway, which validates the `apikey`
+    // against its registered consumers (anon / service keys). A user-signed JWT is
+    // not a valid Kong apikey, so passing it here makes Kong reject the socket and
+    // Realtime never connects (REST still works because it goes via the Express
+    // API, not Kong). The user JWT is supplied separately via setAuth() so RLS on
+    // postgres_changes still resolves auth.uid(). This matches the desktop daemon
+    // (relay-deamon1/src/config.js) and the mobile main client (api/supabase.ts).
+    client = createClient(Config.SUPABASE_URL!, Config.SUPABASE_ANON_KEY!, {
       auth:     { persistSession: false, autoRefreshToken: false },
-      realtime: { params: { eventsPerSecond: 5 } },
+      realtime: { params: { eventsPerSecond: 10 } },
     })
     client.realtime.setAuth(token)
     currentToken = token

@@ -14,7 +14,11 @@ import notifee, {
   EventType,
 } from '@notifee/react-native'
 import { registerPushToken } from '../api/server'
+import { getDeviceId } from '../api/device'
 import { navigationRef } from '../navigation/RootNavigator'
+
+// FCM token cached when deviceId isn't ready yet; flushed by DeviceBootstrap
+let _pendingPushToken: string | null = null
 
 // ── Request permission (Android 13+ requires explicit permission) ─────────────
 async function requestPermission(): Promise<boolean> {
@@ -40,13 +44,25 @@ async function requestPermission(): Promise<boolean> {
 }
 
 // ── Save FCM token via server so the backend can send pushes ──────────────────
+// If deviceId is not yet set, caches the token so flushPushToken() can send it
+// once DeviceBootstrap finishes registering the device.
 async function savePushToken(token: string) {
+  if (!getDeviceId()) {
+    _pendingPushToken = token
+    return
+  }
+  _pendingPushToken = null
   try {
     await registerPushToken(token, Platform.OS)
     console.log('[FCM] Push token registered with server')
   } catch (e: any) {
     console.warn('[FCM] Failed to register push token:', e?.message ?? e)
   }
+}
+
+// Called by DeviceBootstrap after the deviceId is set
+export async function flushPushToken() {
+  if (_pendingPushToken) await savePushToken(_pendingPushToken)
 }
 
 // ── Create the notification channel (Android only) ───────────────────────────
@@ -84,14 +100,12 @@ async function displayNotification(remoteMessage: any) {
   })
 }
 
-// ── Navigate to a request detail screen from anywhere in the app ──────────────
-// Uses a navigation ref so this works regardless of the calling component's
-// position in the navigator tree (avoids "not handled by any navigator" error).
+// ── Navigate to a request detail from a push notification tap ────────────────
 function navigateToRequest(requestId: string) {
   if (!navigationRef.isReady()) return
-  // Navigate through: RootStack(App) → Tab(RequestsTab) → RequestsStack(RequestDetail)
+  // Navigate through: RootStack(App) → Tab(ChatsTab) → RequestDetail
   navigationRef.navigate('App', {
-    screen: 'RequestsTab',
+    screen: 'ChatsTab',
     params: {
       screen: 'RequestDetail',
       params: { id: requestId },

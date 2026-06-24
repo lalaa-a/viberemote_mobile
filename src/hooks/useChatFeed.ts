@@ -92,13 +92,33 @@ export function useChatFeed(sessionId: string) {
   useEffect(() => {
     let cancelled = false
     let unsub: (() => void) | null = null
+    let nudgeTimer: ReturnType<typeof setTimeout> | null = null
+
+    // Coalesce broadcast nudges. postgres_changes already appends each new row
+    // cheaply from its payload; the broadcast is only a reconciliation backstop for
+    // anything that path drops. Invalidating an infinite query refetches ALL loaded
+    // pages, so firing it on every streamed event would thrash a long conversation
+    // (the "VirtualizedList slow to update" warning). Debounce so a burst of events
+    // triggers at most one refetch after it settles.
+    const scheduleReconcile = () => {
+      if (nudgeTimer) clearTimeout(nudgeTimer)
+      nudgeTimer = setTimeout(() => qc.invalidateQueries({ queryKey: feedKey }), 600)
+    }
 
     ;(async () => {
       const client = await getRealtimeClient()
       if (!client || cancelled) return
 
       const channel = client
-        .channel(`chat:${sessionId}`)
+        // Topic name must equal the server broadcast topic (`session:<id>`) so the
+        // broadcast nudge below is delivered here. postgres_changes ignores the
+        // channel name, so both mechanisms share one channel/socket.
+        .channel(`session:${sessionId}`)
+        // Reliable live-edge nudge over broadcast (bypasses RLS/replica-identity,
+        // which silently drop postgres_changes on self-hosted Supabase — see
+        // LIVE_FEED_REALTIME_DIAGNOSIS.md). The server fires this on every feed
+        // write; we refetch the user-authed feed endpoint to pull the new tail.
+        .on('broadcast', { event: 'feed' }, scheduleReconcile)
         // New agent reasoning / activity
         .on('postgres_changes', {
           event: 'INSERT', schema: 'public', table: 'terminal_events',
@@ -142,13 +162,21 @@ export function useChatFeed(sessionId: string) {
           const row = payload.new as MobileCommand
           qc.setQueryData<InfiniteData<FeedPage>>(feedKey, old => patchRow(old, row.id, row))
         })
-        .subscribe()
+        .subscribe((status, err) => {
+          // Without this, a failed/half-open subscription is indistinguishable from
+          // a healthy idle one. Surfaces the silent-drop case (stays SUBSCRIBED but
+          // delivers nothing) and any CHANNEL_ERROR / TIMED_OUT.
+          if (status !== 'SUBSCRIBED') {
+            console.warn('[chat realtime]', sessionId, status, err?.message ?? '')
+          }
+        })
 
       unsub = () => { try { channel.unsubscribe() } catch {} }
     })()
 
     return () => {
       cancelled = true
+      if (nudgeTimer) clearTimeout(nudgeTimer)
       if (unsub) unsub()
     }
   }, [sessionId]) // eslint-disable-line react-hooks/exhaustive-deps

@@ -1,6 +1,6 @@
 import React from 'react'
-import { View, Text, StyleSheet, StatusBar } from 'react-native'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { View, Text, StyleSheet, StatusBar, AppState, type AppStateStatus } from 'react-native'
+import { QueryClient, QueryClientProvider, focusManager } from '@tanstack/react-query'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { RootNavigator } from './src/navigation/RootNavigator'
@@ -14,12 +14,22 @@ const queryClient = new QueryClient({
       retryDelay:        1000,
       staleTime:         30_000,
       gcTime:            5 * 60_000,
+      // Realtime carries the live edge; polling is only a backstop. Don't burn
+      // requests on screens the user isn't looking at or while backgrounded.
+      refetchIntervalInBackground: false,
+      refetchOnWindowFocus:        false,
     },
     mutations: {
       retry: 1,
     },
   },
 })
+
+// Tie React Query's "focus" to RN app state so timers pause in the background and
+// resume (with a single refetch) on foreground — App State drives focusManager.
+AppState.addEventListener('change', (s: AppStateStatus) =>
+  focusManager.setFocused(s === 'active'),
+)
 
 // ── Toast notification ────────────────────────────────────────────────────────
 function Toast() {

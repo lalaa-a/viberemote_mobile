@@ -1,2 +1,2 @@
-// Re-export from server API — kept for any legacy imports
-export { fetchMachines } from './server'
+// Re-export from server API for any existing imports
+export { fetchMachines, deleteMachine, unpairMachine } from './server'

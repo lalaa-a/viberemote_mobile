@@ -7,18 +7,19 @@ import { useRoute, useNavigation } from '@react-navigation/native'
 import type { RouteProp } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
 import { formatDistanceToNow } from 'date-fns'
-import { useRequest, useDecideRequest } from '../../hooks/useRequests'
+import { useRequest, useDecideRequest, useAnswerRequest } from '../../hooks/useRequests'
 import { DiffViewer } from '../../components/DiffViewer/DiffViewer'
 import { RiskBadge } from '../../components/RiskBadge'
+import { QuestionCard } from '../../components/QuestionCard'
 import { GradientBackground } from '../../components/GradientBackground'
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../../constants/colors'
 import { useAppStore } from '../../store/useAppStore'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import Ionicons from 'react-native-vector-icons/Ionicons'
-import type { RequestsStackParamList } from '../../types'
+import type { SessionsStackParamList, SelectedAnswer } from '../../types'
 
-type Route = RouteProp<RequestsStackParamList, 'RequestDetail'>
-type Nav   = NativeStackNavigationProp<RequestsStackParamList>
+type Route = RouteProp<SessionsStackParamList, 'RequestDetail'>
+type Nav   = NativeStackNavigationProp<SessionsStackParamList>
 
 const MONO = Platform.OS === 'ios' ? 'Menlo' : 'monospace'
 
@@ -29,8 +30,20 @@ export function RequestDetailScreen() {
 
   const { data: request, isLoading } = useRequest(id)
   const decide    = useDecideRequest()
+  const answer    = useAnswerRequest()
   const showToast = useAppStore(s => s.showToast)
   const insets    = useSafeAreaInsets()
+
+  async function handleAnswer(answers: SelectedAnswer[]) {
+    if (!request) return
+    try {
+      await answer.mutateAsync({ id, answers })
+      showToast('Answer sent', 'success')
+      navigation.goBack()
+    } catch (err: any) {
+      Alert.alert('Error', err.message ?? 'Failed to send answer')
+    }
+  }
 
   async function handleDecide(decision: 'approved' | 'denied') {
     if (!request) return
@@ -66,6 +79,34 @@ export function RequestDetailScreen() {
         <View style={styles.center}>
           <ActivityIndicator size="large" color={Colors.accent} />
         </View>
+      </GradientBackground>
+    )
+  }
+
+  // ── Question requests render the QuestionCard (option picker) instead of the
+  //    approve/deny approval layout. QuestionCard handles its own answered state.
+  if (request.kind === 'question') {
+    return (
+      <GradientBackground>
+        <StatusBar barStyle="dark-content" translucent backgroundColor="transparent" />
+        <View style={[styles.backRow, { paddingTop: insets.top + 4 }]}>
+          <TouchableOpacity
+            onPress={() => navigation.goBack()}
+            style={styles.backBtn}
+            activeOpacity={0.7}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ionicons name="chevron-back" size={20} color={Colors.textSecondary} />
+            <Text style={styles.backLabel}>Back</Text>
+          </TouchableOpacity>
+        </View>
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={[styles.content, { paddingHorizontal: 0 }]}
+          showsVerticalScrollIndicator={false}
+        >
+          <QuestionCard request={request} onSubmit={handleAnswer} />
+        </ScrollView>
       </GradientBackground>
     )
   }

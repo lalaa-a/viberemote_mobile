@@ -8,6 +8,23 @@ export type RequestStatus =
   | 'denied'
   | 'timeout'
   | 'cli_pending'
+  | 'answered'
+
+// ── Multiple-choice questions (Claude Code's AskUserQuestion) ───────────────────
+export type RequestKind = 'approval' | 'question'
+
+export interface QuestionOption { label: string; description?: string }
+export interface QuestionSpec {
+  header?:      string
+  question:     string
+  multiSelect?: boolean
+  options:      QuestionOption[]
+}
+export interface SelectedAnswer {
+  question_index: number
+  selected:       { index: number; label: string }[]
+  custom_text?:   string
+}
 
 export interface DiffHunk {
   type:     'add' | 'remove' | 'context'
@@ -34,12 +51,32 @@ export interface FileDiff {
 }
 
 export interface Machine {
-  id:        string
-  user_id:   string
-  label:     string
-  is_online: boolean
-  last_seen: string
-  created_at: string
+  id:               string
+  user_id:          string
+  label:            string
+  is_online:        boolean
+  last_seen:        string
+  created_at:       string
+  paired_device_id?: string | null
+  paired_at?:        string | null
+  connection?:       'this' | 'other' | 'none'
+  paired_device?:    MobileDevice | null
+}
+
+export interface MobileDevice {
+  id:             string
+  device_name:    string
+  platform:       string
+  last_active_at: string
+  created_at:     string
+}
+
+export interface Profile {
+  id:           string
+  email:        string
+  display_name: string | null
+  avatar_url:   string | null
+  updated_at:   string | null
 }
 
 export interface PendingRequest {
@@ -66,16 +103,21 @@ export interface PendingRequest {
   decided_at:     string | null
   decided_by:     'pc' | 'mobile' | null
   created_at:     string
+  // question requests (kind='question') — undefined kind ⇒ treat as 'approval'
+  kind?:             RequestKind
+  question?:         { questions: QuestionSpec[] } | null
+  selected_options?: SelectedAnswer[] | null
   // joined
   machines?:      Pick<Machine, 'id' | 'label' | 'is_online'>
 }
 
-// QR code payload scanned from the desktop app
+// QR code payload scanned from the desktop app (for pairing, not auth)
 export interface QRPayload {
-  machineId:   string
-  apiKey:      string
-  supabaseUrl: string
-  apiUrl:      string
+  machineId: string
+  apiKey:    string
+  // One-time pairing nonce (5-min TTL) minted by the desktop. Required — replays
+  // and stale QRs are rejected server-side.
+  challenge: string
 }
 
 // ── Sessions / agents ─────────────────────────────────────────────────────────
@@ -91,6 +133,7 @@ export interface AgentSession {
   cwd:               string | null
   harness:           HarnessId
   cli_alive:         boolean        // false = the CLI window was closed
+  harness_enabled:   boolean        // false = mobile support for this harness is OFF on the desktop
   status:            SessionStatus
   pending_count:     number
   last_activity_at:  string
@@ -158,14 +201,20 @@ import type { NavigatorScreenParams } from '@react-navigation/native'
 export type { NavigatorScreenParams }
 
 export type RootStackParamList = {
-  SignIn: undefined
+  Auth:   NavigatorScreenParams<AuthStackParamList> | undefined
   App:    NavigatorScreenParams<TabParamList> | undefined
+  QRScan: undefined
+}
+
+export type AuthStackParamList = {
+  SignIn:  undefined
+  SignUp:  undefined
 }
 
 export type TabParamList = {
-  RequestsTab: NavigatorScreenParams<RequestsStackParamList> | undefined
   ChatsTab:    NavigatorScreenParams<SessionsStackParamList> | undefined
   MachinesTab: undefined
+  ProfileTab:  undefined
 }
 
 export interface TerminalEvent {
@@ -181,9 +230,8 @@ export interface TerminalEvent {
   created_at: string
 }
 
-export type RequestsStackParamList = {
-  RequestsList:  undefined
-  RequestDetail: { id: string }
+export type QRScanStackParamList = {
+  QRScan: undefined
 }
 
 export type SessionsStackParamList = {

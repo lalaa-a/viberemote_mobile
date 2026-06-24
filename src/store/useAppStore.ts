@@ -1,31 +1,37 @@
 import { create } from 'zustand'
-import { getCredentials, type MachineCredentials } from '../api/server'
+import type { Session } from '@supabase/supabase-js'
 
 interface AppState {
-  // Machine credentials — populated from MMKV on startup, then kept in sync
-  credentials: MachineCredentials | null
-  setCredentials: (c: MachineCredentials | null) => void
+  // Supabase user session — kept in sync via onAuthStateChange
+  session:    Session | null
+  setSession: (s: Session | null) => void
 
-  // Which machine to filter requests by (null = all)
-  selectedMachineId: string | null
+  // Device ID persisted after first registration
+  deviceId:    string | null
+  setDeviceId: (id: string | null) => void
+
+  // Which machine to filter chats by (null = all)
+  selectedMachineId:    string | null
   setSelectedMachineId: (id: string | null) => void
 
   // Toast notification
-  toast: { message: string; type: 'success' | 'error' } | null
-  showToast: (message: string, type?: 'success' | 'error') => void
-  clearToast: () => void
+  toast:       { message: string; type: 'success' | 'error' } | null
+  showToast:   (message: string, type?: 'success' | 'error') => void
+  clearToast:  () => void
 }
 
 export const useAppStore = create<AppState>((set) => ({
-  // Synchronous MMKV read — no loading flash
-  credentials: getCredentials(),
-  setCredentials: (credentials) => set({ credentials }),
+  session:    null,
+  setSession: (session) => set({ session }),
 
-  selectedMachineId: null,
+  deviceId:    null,
+  setDeviceId: (deviceId) => set({ deviceId }),
+
+  selectedMachineId:    null,
   setSelectedMachineId: (id) => set({ selectedMachineId: id }),
 
-  toast: null,
-  showToast: (message, type = 'success') => {
+  toast:      null,
+  showToast:  (message, type = 'success') => {
     set({ toast: { message, type } })
     setTimeout(() => set({ toast: null }), 3000)
   },
