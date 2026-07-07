@@ -206,6 +206,7 @@ const styles = StyleSheet.create({
     paddingTop:    Spacing.px8,
     paddingBottom: TAB_BOTTOM_INSET,
   },
+
   row: {
     flexDirection:     'row',
     alignItems:        'center',

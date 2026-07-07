@@ -13,7 +13,13 @@ export type RequestStatus =
 // ── Multiple-choice questions (Claude Code's AskUserQuestion) ───────────────────
 export type RequestKind = 'approval' | 'question'
 
-export interface QuestionOption { label: string; description?: string }
+export interface QuestionOption {
+  label:        string
+  description?: string
+  // Optional markdown/ASCII preview (mockups, code, diagrams) for side-by-side
+  // comparison. Claude Code only sets this on single-select questions.
+  preview?:     string
+}
 export interface QuestionSpec {
   header?:      string
   question:     string
