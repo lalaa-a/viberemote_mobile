@@ -101,6 +101,11 @@ export const FontFamily = {
   sans:        'Inter',
   loraItalic:  'Lora-MediumItalic',
   mono:        Platform.OS === 'ios' ? 'Menlo' : 'JetBrainsMono-Regular',
+  // Dark UI fonts — install via assets/fonts/ + npx react-native-asset
+  // Android matches fontFamily to the file name (minus .ttf); iOS uses the
+  // internal PostScript name (Bitcount…-Regular, "Google Sans Flex").
+  bitcount:    'BitcountGridSingle-Regular', // app name title only
+  googleSans:  Platform.OS === 'ios' ? 'Google Sans Flex' : 'GoogleSansFlex-Regular',
 }
 
 export const FontSize = {
@@ -207,3 +212,58 @@ export const Shadow = {
 // ── Tab bar bottom inset ──────────────────────────────────────────────────────
 // 60 (bar) + 20 (bottom margin) + safe area
 export const TAB_BOTTOM_INSET = 104
+
+// ── Dark navy theme ───────────────────────────────────────────────────────────
+export const DarkColors = {
+  bg:            '#082134',
+  surface:       '#143753',
+  surfaceRaised: '#164269',
+  border:        'rgba(255,255,255,0.06)',
+  borderMid:     'rgba(255,255,255,0.10)',
+  textPrimary:   '#FFFFFF',
+  textSecondary: 'rgba(255,255,255,0.65)',
+  textTertiary:  'rgba(255,255,255,0.40)',
+  statusActive:  '#4CAF50',
+  statusIdle:    '#FFA726',
+  statusFinished:'rgba(255,255,255,0.30)',
+  online:        '#27E07E',   // bright green — online pill + enabled harness bubble
+  approve:       '#27E07E',   // success button
+  unpair:        '#D9A441',   // amber — unpair button
+  danger:        '#EF5350',   // deny button / high risk
+  dangerDeep:    '#B71C1C',   // critical risk
+  badgeBg:       '#1976D2',
+  badgeText:     '#FFFFFF',
+  tabActive:     '#FFFFFF',
+  tabInactive:   'rgba(255,255,255,0.40)',
+  tabChipActive: 'rgba(255,255,255,0.12)',
+}
+
+export const DarkStatusColor: Record<string, string> = {
+  active:   DarkColors.statusActive,
+  idle:     DarkColors.statusIdle,
+  finished: DarkColors.statusFinished,
+  closed:   DarkColors.statusFinished,
+}
+
+// Dark tool tints — icon-box backgrounds for ActivityBubble / RequestCard
+export const DarkToolTint: Record<string, { bg: string; fg: string }> = {
+  Bash:      { bg: 'rgba(255,255,255,0.08)', fg: '#FFFFFF' },
+  bash:      { bg: 'rgba(255,255,255,0.08)', fg: '#FFFFFF' },
+  Write:     { bg: 'rgba(217,164,65,0.18)',  fg: '#D9A441' },
+  write:     { bg: 'rgba(217,164,65,0.18)',  fg: '#D9A441' },
+  Edit:      { bg: 'rgba(39,224,126,0.18)',  fg: '#27E07E' },
+  edit:      { bg: 'rgba(39,224,126,0.18)',  fg: '#27E07E' },
+  MultiEdit: { bg: 'rgba(25,118,210,0.18)',  fg: '#1976D2' },
+  patch:     { bg: 'rgba(25,118,210,0.18)',  fg: '#1976D2' },
+  Read:      { bg: 'rgba(139,108,196,0.20)', fg: '#B79CE6' },
+  read:      { bg: 'rgba(139,108,196,0.20)', fg: '#B79CE6' },
+  unknown:   { bg: 'rgba(255,255,255,0.06)', fg: 'rgba(255,255,255,0.65)' },
+}
+
+// Risk level → accent color (card left border, badge)
+export const DarkRiskColor: Record<string, string> = {
+  low:      DarkColors.online,
+  medium:   DarkColors.unpair,
+  high:     DarkColors.danger,
+  critical: DarkColors.dangerDeep,
+}

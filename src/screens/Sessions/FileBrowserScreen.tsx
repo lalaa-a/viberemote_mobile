@@ -8,9 +8,11 @@ import Ionicons from 'react-native-vector-icons/Ionicons'
 import { useRoute, useNavigation } from '@react-navigation/native'
 import type { RouteProp } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useFileTree } from '../../hooks/useFileTree'
 import { GradientBackground } from '../../components/GradientBackground'
-import { Colors, Spacing, Radius, FontSize, FontFamily, TAB_BOTTOM_INSET, Shadow } from '../../constants/colors'
+import { BackButton } from '../../components/ui/BackButton'
+import { DarkColors, Spacing, Radius, FontSize, FontFamily } from '../../constants/colors'
 import type { SessionsStackParamList, FsNode } from '../../types'
 
 type Route = RouteProp<SessionsStackParamList, 'FileBrowser'>
@@ -38,6 +40,7 @@ function formatSize(bytes: number): string {
 export function FileBrowserScreen() {
   const route      = useRoute<Route>()
   const navigation = useNavigation<Nav>()
+  const insets     = useSafeAreaInsets()
   const { sessionId, cwd } = route.params
 
   const { tree, error, loadPath, loading } = useFileTree(sessionId)
@@ -50,7 +53,7 @@ export function FileBrowserScreen() {
     if (!tree) return
     const topDirs = tree.filter(n => n.type === 'dir').map(n => n.path)
     setExpanded(new Set(topDirs))
-  }, [tree !== null] )
+  }, [tree !== null])
 
   const handleNodePress = useCallback(async (item: FlatItem) => {
     const { node } = item
@@ -77,12 +80,8 @@ export function FileBrowserScreen() {
       {
         text: 'Use in prompt',
         onPress: () => {
-          // Navigate back to Chat and set prefill so the compose bar is populated.
-          // merge:true updates the existing Chat screen in the stack without
-          // pushing a new one, so the back button still works correctly.
           navigation.navigate('Chat', {
             ...route.params,
-            // FileBrowser params subset — Chat requires these at minimum:
             sessionId:       route.params.sessionId,
             machineLabel:    route.params.machineLabel,
             cwd:             route.params.cwd,
@@ -106,27 +105,27 @@ export function FileBrowserScreen() {
 
     return (
       <TouchableOpacity
-        style={[styles.row, { paddingLeft: Spacing.px20 + depth * 16 }]}
+        style={styles.row}
         onPress={() => handleNodePress(item)}
         onLongPress={() => handleNodeLongPress(node)}
         activeOpacity={0.6}
         delayLongPress={400}
       >
+        {/* Depth connector guides — the "tree" rails */}
+        {Array.from({ length: depth }).map((_, i) => (
+          <View key={i} style={styles.guide} />
+        ))}
+
         <Ionicons
-          name={isDir ? (isExpanded ? 'chevron-down' : 'chevron-forward') : 'document-outline'}
-          size={12}
-          color={isDir ? Colors.accent : Colors.textTertiary}
+          name={isDir ? (isExpanded ? 'chevron-down' : 'chevron-forward') : 'document-text-outline'}
+          size={14}
+          color={isDir ? DarkColors.online : DarkColors.textTertiary}
           style={styles.nodeIcon}
         />
-        <Text
-          style={[styles.nodeName, isDir && styles.dirName]}
-          numberOfLines={1}
-        >
+        <Text style={[styles.nodeName, isDir && styles.dirName]} numberOfLines={1}>
           {node.name}
         </Text>
-        {isLoading && (
-          <ActivityIndicator size="small" color={Colors.accent} />
-        )}
+        {isLoading && <ActivityIndicator size="small" color={DarkColors.online} />}
         {!isDir && node.size !== undefined && (
           <Text style={styles.fileSize}>{formatSize(node.size)}</Text>
         )}
@@ -138,14 +137,17 @@ export function FileBrowserScreen() {
   }
 
   return (
-    <GradientBackground>
-      <StatusBar barStyle="dark-content" translucent backgroundColor="transparent" />
+    <GradientBackground style={styles.root}>
+      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
 
-      {/* Pinned path bar */}
-      <View style={styles.pathBar}>
-        <Ionicons name="folder-open-outline" size={13} color={Colors.textTertiary} />
-        <Text style={styles.pathText} numberOfLines={1}>{cwd ?? '~'}/</Text>
-        {loading && <ActivityIndicator size="small" color={Colors.accent} />}
+      {/* Top bar — BackButton + path pill (matches Chat / Details) */}
+      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
+        <BackButton />
+        <View style={styles.pathPill}>
+          <Ionicons name="folder-open-outline" size={14} color={DarkColors.textSecondary} />
+          <Text style={styles.pathText} numberOfLines={1}>{cwd ?? '~'}/</Text>
+          {loading && <ActivityIndicator size="small" color={DarkColors.online} />}
+        </View>
       </View>
 
       {error ? (
@@ -157,7 +159,7 @@ export function FileBrowserScreen() {
         </View>
       ) : loading && !tree ? (
         <View style={styles.center}>
-          <ActivityIndicator size="large" color={Colors.accent} />
+          <ActivityIndicator size="large" color={DarkColors.online} />
           <Text style={styles.loadingText}>Loading file tree…</Text>
         </View>
       ) : (
@@ -174,9 +176,9 @@ export function FileBrowserScreen() {
         />
       )}
 
-      {/* Glass hint bar */}
-      <View style={styles.hintBar}>
-        <Ionicons name="finger-print-outline" size={12} color={Colors.textTertiary} />
+      {/* Hint bar */}
+      <View style={[styles.hintBar, { paddingBottom: insets.bottom + Spacing.px12 }]}>
+        <Ionicons name="finger-print-outline" size={12} color={DarkColors.textTertiary} />
         <Text style={styles.hintText}>Long-press any item to use path in a prompt</Text>
       </View>
     </GradientBackground>
@@ -184,112 +186,49 @@ export function FileBrowserScreen() {
 }
 
 const styles = StyleSheet.create({
-  pathBar: {
-    flexDirection:     'row',
-    alignItems:        'center',
-    gap:               Spacing.px8,
-    paddingHorizontal: Spacing.px20,
-    paddingVertical:   Spacing.px12,
-    backgroundColor:   Colors.surfaceGlassStrong,
-    borderBottomWidth: 1,
-    borderColor:       Colors.borderHairline,
-    borderTopColor:    Colors.borderGlass,
-    ...Shadow.glassLow,
+  root: { backgroundColor: DarkColors.bg },
+
+  header: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.px10,
+    paddingHorizontal: Spacing.px20, paddingBottom: Spacing.px8,
   },
-  pathText: {
-    flex:       1,
-    fontFamily: FontFamily.mono,
-    fontSize:   FontSize.monoSmall,
-    color:      Colors.textSecondary,
+  pathPill: {
+    flex: 1, height: 48, flexDirection: 'row', alignItems: 'center', gap: Spacing.px8,
+    paddingHorizontal: Spacing.px16, borderRadius: Radius.full,
+    backgroundColor: DarkColors.surfaceRaised,
   },
-  list: {
-    paddingTop:    Spacing.px8,
-    paddingBottom: TAB_BOTTOM_INSET,
-  },
+  pathText: { flex: 1, fontFamily: FontFamily.mono, fontSize: FontSize.monoSmall, color: DarkColors.textSecondary },
+
+  list: { paddingTop: Spacing.px8, paddingBottom: Spacing.px16, paddingHorizontal: Spacing.px16 },
 
   row: {
-    flexDirection:     'row',
-    alignItems:        'center',
-    paddingRight:      Spacing.px20,
-    paddingVertical:   Spacing.px8,
-    gap:               Spacing.px8,
-    borderBottomWidth: 1,
-    borderColor:       Colors.borderHairline,
+    flexDirection: 'row', alignItems: 'center',
+    paddingVertical: Spacing.px10, gap: Spacing.px8,
+    borderBottomWidth: 1, borderColor: DarkColors.border,
   },
-  nodeIcon: {
-    width:     14,
-    textAlign: 'center',
-  },
-  nodeName: {
-    flex:       1,
-    fontFamily: FontFamily.mono,
-    fontSize:   FontSize.monoSmall,
-    color:      Colors.textPrimary,
-  },
-  dirName: {
-    fontWeight: '600',
-    color:      Colors.accent,
-  },
-  fileSize: {
-    fontFamily: FontFamily.mono,
-    fontSize:   FontSize.microLabel,
-    color:      Colors.textTertiary,
-    minWidth:   48,
-    textAlign:  'right',
-  },
-  lazyHint: {
-    fontSize:  FontSize.microLabel,
-    color:     Colors.textTertiary,
-    fontStyle: 'italic',
-  },
-  center: {
-    flex:           1,
-    alignItems:     'center',
-    justifyContent: 'center',
-    gap:            Spacing.px12,
-    padding:        Spacing.px32,
-  },
-  loadingText: {
-    fontSize: FontSize.label,
-    color:    Colors.textSecondary,
-  },
-  emptyText: {
-    fontSize:  FontSize.label,
-    color:     Colors.textTertiary,
-    fontStyle: 'italic',
-  },
-  errorText: {
-    fontSize:  FontSize.label,
-    color:     Colors.danger,
-    textAlign: 'center',
-  },
+  // One vertical rail per depth level → tree connector look
+  guide: { width: 16, alignSelf: 'stretch', borderLeftWidth: 1, borderLeftColor: DarkColors.border, marginLeft: 4 },
+  nodeIcon: { width: 16, textAlign: 'center' },
+  nodeName: { flex: 1, fontFamily: FontFamily.mono, fontSize: FontSize.monoSmall, color: DarkColors.textSecondary },
+  dirName: { fontWeight: '600', color: DarkColors.textPrimary },
+  fileSize: { fontFamily: FontFamily.mono, fontSize: FontSize.microLabel, color: DarkColors.textTertiary, minWidth: 48, textAlign: 'right' },
+  lazyHint: { fontSize: FontSize.microLabel, color: DarkColors.textTertiary, fontStyle: 'italic' },
+
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.px12, padding: Spacing.px32 },
+  loadingText: { fontSize: FontSize.label, color: DarkColors.textSecondary, fontFamily: FontFamily.googleSans },
+  emptyText: { fontSize: FontSize.label, color: DarkColors.textTertiary, fontStyle: 'italic' },
+  errorText: { fontSize: FontSize.label, color: DarkColors.danger, textAlign: 'center', fontFamily: FontFamily.googleSans },
   retryBtn: {
-    paddingHorizontal: Spacing.px20,
-    paddingVertical:   Spacing.px8,
-    borderRadius:      Radius.sm,
-    borderWidth:       1,
-    borderColor:       Colors.danger + '60',
+    paddingHorizontal: Spacing.px20, paddingVertical: Spacing.px8,
+    borderRadius: Radius.full, borderWidth: 1, borderColor: DarkColors.danger + '80',
   },
-  retryText: {
-    fontSize:   FontSize.label,
-    fontWeight: '600',
-    color:      Colors.danger,
-  },
+  retryText: { fontSize: FontSize.label, fontWeight: '600', color: DarkColors.danger, fontFamily: FontFamily.googleSans },
+
   hintBar: {
-    flexDirection:     'row',
-    alignItems:        'center',
-    justifyContent:    'center',
-    gap:               Spacing.px4,
-    paddingVertical:   Spacing.px12,
-    paddingBottom:     Platform.OS === 'ios' ? 32 : Spacing.px12,
-    backgroundColor:   Colors.surfaceGlassStrong,
-    borderTopWidth:    1,
-    borderColor:       Colors.borderHairline,
-    borderTopColor:    Colors.borderGlass,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.px4,
+    paddingTop: Spacing.px12,
+    backgroundColor: DarkColors.surface,
+    borderTopWidth: 1, borderTopColor: DarkColors.border,
   },
-  hintText: {
-    fontSize:  FontSize.microLabel,
-    color:     Colors.textTertiary,
-    fontStyle: 'italic',
-  },
+  hintText: { fontSize: FontSize.microLabel, color: DarkColors.textTertiary, fontStyle: 'italic' },
 })

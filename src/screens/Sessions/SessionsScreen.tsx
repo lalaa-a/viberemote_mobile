@@ -1,6 +1,6 @@
 import React from 'react'
 import {
-  View, Text, FlatList, StyleSheet,
+  View, Text, FlatList, StyleSheet, TextInput,
   RefreshControl, TouchableOpacity, StatusBar, ScrollView,
 } from 'react-native'
 import { useNavigation } from '@react-navigation/native'
@@ -14,9 +14,8 @@ import { useSessionsRealtime } from '../../hooks/useSessionsRealtime'
 import { fetchMachines } from '../../api/server'
 import { useAppStore } from '../../store/useAppStore'
 import { GradientBackground } from '../../components/GradientBackground'
-import { LiveBadge } from '../../components/LiveBadge'
-import { HarnessBadge } from '../../components/HarnessBadge'
-import { Colors, Spacing, Radius, FontSize, FontFamily, Shadow, TAB_BOTTOM_INSET } from '../../constants/colors'
+import { HarnessAvatar } from '../../components/HarnessAvatar'
+import { DarkColors, DarkStatusColor, Spacing, Radius, FontSize, FontFamily, TAB_BOTTOM_INSET } from '../../constants/colors'
 import type { SessionsStackParamList, AgentSession, HarnessId } from '../../types'
 
 function dirName(cwd: string | null): string {
@@ -26,10 +25,18 @@ function dirName(cwd: string | null): string {
 
 type Nav = NativeStackNavigationProp<SessionsStackParamList>
 
-const STATUS_COLOR: Record<string, string> = {
-  active:   Colors.success,
-  idle:     Colors.warning,
-  finished: Colors.textTertiary,
+function getStatusColor(session: AgentSession): string {
+  if (session.cli_alive === false && session.status !== 'active') {
+    return 'rgba(255,255,255,0.20)'
+  }
+  return DarkStatusColor[session.status] ?? DarkColors.statusFinished
+}
+
+function getStatusLabel(session: AgentSession): string {
+  if (session.cli_alive === false && session.status !== 'active') return 'Closed'
+  if (session.status === 'active')   return 'Active'
+  if (session.status === 'idle')     return 'Idle'
+  return 'Finished'
 }
 
 // ── Machine filter chips ──────────────────────────────────────────────────────
@@ -49,6 +56,7 @@ function MachineChips() {
     <ScrollView
       horizontal
       showsHorizontalScrollIndicator={false}
+      style={chipStyles.scroll}
       contentContainerStyle={chipStyles.wrap}
     >
       <TouchableOpacity
@@ -69,7 +77,7 @@ function MachineChips() {
             onPress={() => setSelectedMachineId(active ? null : m.id)}
             activeOpacity={0.75}
           >
-            <View style={[chipStyles.dot, { backgroundColor: m.is_online ? Colors.success : Colors.borderHairline }]} />
+            <View style={[chipStyles.dot, { backgroundColor: m.is_online ? DarkColors.statusActive : DarkColors.statusFinished }]} />
             <Text style={[chipStyles.chipText, active && chipStyles.chipTextActive]} numberOfLines={1}>
               {m.label}
             </Text>
@@ -82,8 +90,8 @@ function MachineChips() {
 
 // ── Chat card ─────────────────────────────────────────────────────────────────
 function SessionCard({ session, onOpen }: { session: AgentSession; onOpen: () => void }) {
-  const cliClosed  = session.cli_alive === false && session.status !== 'active'
-  const dotColor   = cliClosed ? Colors.textTertiary : (STATUS_COLOR[session.status] ?? Colors.textTertiary)
+  const dotColor   = getStatusColor(session)
+  const statusLabel = getStatusLabel(session)
   const isActive   = session.status === 'active'
   const hasPending = session.pending_count > 0
   const dir        = dirName(session.cwd)
@@ -93,26 +101,23 @@ function SessionCard({ session, onOpen }: { session: AgentSession; onOpen: () =>
 
   return (
     <TouchableOpacity style={styles.card} onPress={onOpen} activeOpacity={0.75}>
-      <View style={[styles.avatar, { borderColor: dotColor + '60' }]}>
-        <Text style={styles.avatarText}>{dir.charAt(0).toUpperCase()}</Text>
-        {isActive && <View style={[styles.avatarDot, { backgroundColor: Colors.success }]} />}
-      </View>
+      <HarnessAvatar
+        harness={(session.harness ?? 'claude-code') as HarnessId}
+        dir={dir}
+        statusColor={dotColor}
+        isActive={isActive}
+      />
 
       <View style={styles.cardBody}>
         <View style={styles.cardTopRow}>
-          <View style={styles.cardTitleRow}>
-            <Text style={styles.cardTitle} numberOfLines={1}>{dir}</Text>
-            <HarnessBadge harness={(session.harness ?? 'claude-code') as HarnessId} size="xs" />
-          </View>
+          <Text style={styles.cardTitle} numberOfLines={1}>{dir}</Text>
           <Text style={styles.timeText}>{timeAgo}</Text>
         </View>
 
         <View style={styles.cardBottomRow}>
           <View style={styles.cardMeta}>
             <View style={[styles.statusDot, { backgroundColor: dotColor }]} />
-            <Text style={[styles.statusLabel, { color: dotColor }]}>
-              {cliClosed ? 'Closed' : isActive ? 'Active' : session.status === 'idle' ? 'Idle' : 'Finished'}
-            </Text>
+            <Text style={[styles.statusLabel, { color: dotColor }]}>{statusLabel}</Text>
             <Text style={styles.metaSep}>·</Text>
             <Text style={styles.machineText} numberOfLines={1}>{session.machine_label}</Text>
           </View>
@@ -132,6 +137,7 @@ export function SessionsScreen() {
   const navigation = useNavigation<Nav>()
   const insets     = useSafeAreaInsets()
   const selectedMachineId = useAppStore(s => s.selectedMachineId)
+  const [query, setQuery] = React.useState('')
 
   const { data: sessions = [], isLoading, refetch, isRefetching } = useSessions()
 
@@ -142,9 +148,15 @@ export function SessionsScreen() {
   )
   useSessionsRealtime(machineIds)
 
-  const filtered = selectedMachineId
-    ? sessions.filter(s => s.machine_id === selectedMachineId)
-    : sessions
+  const q = query.trim().toLowerCase()
+  const filtered = sessions.filter(s => {
+    if (selectedMachineId && s.machine_id !== selectedMachineId) return false
+    if (!q) return true
+    return (
+      dirName(s.cwd).toLowerCase().includes(q) ||
+      (s.machine_label ?? '').toLowerCase().includes(q)
+    )
+  })
 
   function renderItem({ item }: { item: AgentSession }) {
     return (
@@ -163,15 +175,30 @@ export function SessionsScreen() {
   }
 
   return (
-    <GradientBackground>
-      <StatusBar barStyle="dark-content" translucent backgroundColor="transparent" />
+    <GradientBackground style={styles.root}>
+      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
 
       <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
-        <View>
-          <Text style={styles.appName}>Vibe Remote</Text>
-          <Text style={styles.title}>Chats</Text>
-        </View>
-        <LiveBadge />
+        <Text style={styles.appName}>vibeRemote</Text>
+      </View>
+
+      <View style={styles.searchBar}>
+        <Ionicons name="search-outline" size={18} color={DarkColors.textTertiary} />
+        <TextInput
+          style={styles.searchInput}
+          value={query}
+          onChangeText={setQuery}
+          placeholder="Search Conversations"
+          placeholderTextColor={DarkColors.textTertiary}
+          returnKeyType="search"
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+        {query.length > 0 && (
+          <TouchableOpacity onPress={() => setQuery('')} hitSlop={8}>
+            <Ionicons name="close-circle" size={18} color={DarkColors.textTertiary} />
+          </TouchableOpacity>
+        )}
       </View>
 
       <MachineChips />
@@ -187,15 +214,15 @@ export function SessionsScreen() {
           <RefreshControl
             refreshing={isRefetching}
             onRefresh={refetch}
-            tintColor={Colors.accent}
-            colors={[Colors.accent]}
+            tintColor={DarkColors.textSecondary}
+            colors={[DarkColors.statusActive]}
           />
         }
         ListEmptyComponent={
           isLoading ? null : (
             <View style={styles.empty}>
               <View style={styles.emptyIconWrap}>
-                <Ionicons name="flash-outline" size={48} color={Colors.accentDeep} />
+                <Ionicons name="flash-outline" size={48} color={DarkColors.textSecondary} />
               </View>
               <Text style={styles.emptyTitle}>{'No sessions\nrunning.'}</Text>
               <Text style={styles.emptySub}>
@@ -211,60 +238,63 @@ export function SessionsScreen() {
 }
 
 const chipStyles = StyleSheet.create({
-  wrap: { paddingHorizontal: Spacing.px20, paddingBottom: Spacing.px8, gap: Spacing.px8, flexDirection: 'row' },
+  // flexGrow:0 stops the horizontal scroll from stretching/squishing in the column
+  scroll: { flexGrow: 0, marginBottom: Spacing.px12 },
+  wrap: { paddingHorizontal: Spacing.px20, paddingVertical: Spacing.px4, gap: Spacing.px8, flexDirection: 'row', alignItems: 'center' },
   chip: {
-    flexDirection: 'row', alignItems: 'center', gap: Spacing.px6,
-    paddingHorizontal: Spacing.px12, paddingVertical: Spacing.px6,
-    borderRadius: Radius.full, backgroundColor: Colors.surfaceGlassStrong,
-    borderWidth: 1, borderColor: Colors.borderHairline,
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.px6, height: 34,
+    paddingHorizontal: Spacing.px12,
+    borderRadius: Radius.full, backgroundColor: DarkColors.surface,
+    borderWidth: 1, borderColor: DarkColors.border,
   },
-  chipActive:     { backgroundColor: Colors.accentLight, borderColor: Colors.accent + '80' },
-  chipText:       { fontSize: FontSize.label, color: Colors.textSecondary, fontWeight: '500' },
-  chipTextActive: { color: Colors.accentDeep, fontWeight: '600' },
+  chipActive:     { backgroundColor: DarkColors.surfaceRaised, borderColor: DarkColors.borderMid },
+  chipText:       { fontSize: FontSize.label, color: DarkColors.textSecondary, fontWeight: '500', fontFamily: FontFamily.googleSans },
+  chipTextActive: { color: DarkColors.textPrimary, fontWeight: '600' },
   dot:            { width: 6, height: 6, borderRadius: Radius.full },
 })
 
 const styles = StyleSheet.create({
+  root: { backgroundColor: DarkColors.bg },
   header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    flexDirection: 'row', alignItems: 'center',
     paddingHorizontal: Spacing.px20, paddingBottom: Spacing.px12,
   },
-  appName: { fontSize: 28, fontFamily: FontFamily.serifItalic, color: Colors.textPrimary, lineHeight: 32 },
-  title:   { fontSize: FontSize.cardTitle, fontFamily: FontFamily.loraItalic, fontWeight: '500', color: Colors.textTertiary, letterSpacing: 0.3 },
+  appName: { fontSize: 28, fontFamily: FontFamily.bitcount, color: DarkColors.textPrimary, lineHeight: 34 },
+  searchBar: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.px10,
+    marginHorizontal: Spacing.px20, marginBottom: Spacing.px12,
+    height: 44, paddingHorizontal: Spacing.px16,
+    borderRadius: Radius.full, backgroundColor: DarkColors.surface,
+    borderWidth: 1, borderColor: DarkColors.borderMid,
+  },
+  searchInput: {
+    flex: 1, color: DarkColors.textPrimary, fontFamily: FontFamily.googleSans,
+    fontSize: FontSize.body, padding: 0,
+  },
   listContent: { paddingBottom: TAB_BOTTOM_INSET },
   card: {
     flexDirection: 'row', alignItems: 'center', gap: Spacing.px12,
     paddingVertical: Spacing.px12, paddingHorizontal: Spacing.px20,
-    backgroundColor: Colors.bgPrimary, borderBottomWidth: 1, borderBottomColor: Colors.borderHairline,
-  },
-  avatar: {
-    width: 48, height: 48, borderRadius: Radius.full, backgroundColor: Colors.accentLight,
-    alignItems: 'center', justifyContent: 'center', borderWidth: 2, flexShrink: 0, position: 'relative',
-  },
-  avatarText: { fontSize: FontSize.cardTitle, fontWeight: '700', color: Colors.accentDeep, fontFamily: FontFamily.serifBold },
-  avatarDot: {
-    position: 'absolute', bottom: 1, right: 1, width: 12, height: 12,
-    borderRadius: Radius.full, borderWidth: 2, borderColor: Colors.bgPrimary,
+    backgroundColor: 'transparent', borderBottomWidth: 1, borderBottomColor: DarkColors.border,
   },
   cardBody: { flex: 1, gap: 4 },
   cardTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.px8 },
-  cardTitleRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.px8, flex: 1 },
-  cardTitle: { fontSize: FontSize.cardTitle, fontWeight: '600', color: Colors.textPrimary, flexShrink: 1 },
-  timeText:  { fontSize: FontSize.metadata, color: Colors.textTertiary, flexShrink: 0 },
+  cardTitle: { fontSize: FontSize.body, fontWeight: '600', color: DarkColors.textPrimary, fontFamily: FontFamily.googleSans, flex: 1 },
+  timeText:  { fontSize: FontSize.metadata, color: DarkColors.textTertiary, fontFamily: FontFamily.googleSans, flexShrink: 0 },
   cardBottomRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.px8 },
   cardMeta: { flexDirection: 'row', alignItems: 'center', gap: 5, flex: 1 },
   statusDot: { width: 6, height: 6, borderRadius: Radius.full },
-  statusLabel: { fontSize: FontSize.metadata, fontWeight: '500' },
-  metaSep:     { fontSize: FontSize.metadata, color: Colors.textTertiary },
-  machineText: { fontSize: FontSize.metadata, color: Colors.textTertiary, flex: 1 },
+  statusLabel: { fontSize: FontSize.metadata, fontWeight: '500', fontFamily: FontFamily.googleSans },
+  metaSep:     { fontSize: FontSize.metadata, color: DarkColors.textTertiary },
+  machineText: { fontSize: FontSize.metadata, color: DarkColors.textTertiary, fontFamily: FontFamily.googleSans, flex: 1 },
   badge: {
-    backgroundColor: Colors.danger, borderRadius: Radius.full, minWidth: 20, height: 20,
+    backgroundColor: DarkColors.badgeBg, borderRadius: Radius.full, minWidth: 20, height: 20,
     alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4, flexShrink: 0,
   },
-  badgeText: { fontSize: 10, fontWeight: '700', color: Colors.white },
+  badgeText: { fontSize: 10, fontWeight: '700', color: DarkColors.badgeText, fontFamily: FontFamily.googleSans },
   emptyContainer: { flexGrow: 1, justifyContent: 'center', alignItems: 'center' },
   empty:    { alignItems: 'center', paddingHorizontal: Spacing.px32, gap: Spacing.px12 },
-  emptyIconWrap: { width: 80, height: 80, borderRadius: Radius.full, backgroundColor: Colors.accentLight, alignItems: 'center', justifyContent: 'center', marginBottom: Spacing.px8 },
-  emptyTitle: { fontSize: FontSize.displayM, fontWeight: '500', fontFamily: 'Fraunces-SemiBold', color: Colors.textPrimary, textAlign: 'center', letterSpacing: -0.4, lineHeight: FontSize.displayM * 1.1 },
-  emptySub:   { fontSize: FontSize.body, color: Colors.textSecondary, textAlign: 'center', lineHeight: 22, maxWidth: 280 },
+  emptyIconWrap: { width: 80, height: 80, borderRadius: Radius.full, backgroundColor: DarkColors.surface, alignItems: 'center', justifyContent: 'center', marginBottom: Spacing.px8 },
+  emptyTitle: { fontSize: FontSize.displayM, fontWeight: '600', fontFamily: FontFamily.googleSans, color: DarkColors.textPrimary, textAlign: 'center', letterSpacing: -0.4, lineHeight: FontSize.displayM * 1.1 },
+  emptySub:   { fontSize: FontSize.body, color: DarkColors.textSecondary, fontFamily: FontFamily.googleSans, textAlign: 'center', lineHeight: 22, maxWidth: 280 },
 })

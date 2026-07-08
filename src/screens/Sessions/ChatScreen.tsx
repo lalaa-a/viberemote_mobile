@@ -5,6 +5,7 @@ import {
   Platform, Alert,
 } from 'react-native'
 import type { NativeSyntheticEvent, NativeScrollEvent } from 'react-native'
+import Animated, { FadeInDown } from 'react-native-reanimated'
 import { useRoute, useNavigation, useFocusEffect } from '@react-navigation/native'
 import type { RouteProp } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
@@ -17,11 +18,15 @@ import { useDecideRequest, useAnswerRequest } from '../../hooks/useRequests'
 import { useSendPrompt, useSessions } from '../../hooks/useSessions'
 import { useMachineChannel } from '../../hooks/useMachineChannel'
 import { GradientBackground } from '../../components/GradientBackground'
-import { RiskBadge } from '../../components/RiskBadge'
-import { HarnessBadge } from '../../components/HarnessBadge'
+import { HarnessAvatar } from '../../components/HarnessAvatar'
 import { QuestionCard } from '../../components/QuestionCard'
+import { TerminalText } from '../../components/chat/TerminalText'
+import { BackButton } from '../../components/ui/BackButton'
+import { Button } from '../../components/ui/Button'
+import { Badge, RISK_VARIANT } from '../../components/ui/Badge'
+import { Card } from '../../components/ui/Card'
 import {
-  Colors, Spacing, Radius, FontSize, FontFamily, Shadow, TAB_BOTTOM_INSET,
+  DarkColors, DarkToolTint, Spacing, Radius, FontSize, FontFamily,
 } from '../../constants/colors'
 import type {
   SessionsStackParamList, PendingRequest, TerminalEvent, MobileCommand, SelectedAnswer,
@@ -38,44 +43,47 @@ const TOOL_ICONS: Record<string, string> = {
   Read: 'eye-outline', read: 'eye-outline',
 }
 
+// Reveal-once guards — an output row types out exactly once; if it recycles or
+// isn't the live edge, it renders in full instantly (see plan §13.3/13.4).
+const revealedOutputIds = new Set<string>()
+const seenActivityIds   = new Set<string>()
+
 function dirName(cwd: string | null) {
   if (!cwd) return '~'
   return cwd.split(/[\\/]/).filter(Boolean).pop() ?? cwd
 }
 
-// ── Agent reasoning bubble (left, like WhatsApp "received") ───────────────────
-function OutputBubble({ event }: { event: TerminalEvent }) {
+// ── Agent reasoning — plain CLI output (no bubble), streamed ──────────────────
+function OutputBubble({ event, isLast }: { event: TerminalEvent; isLast: boolean }) {
   const [expanded, setExpanded] = useState(true)
   const text = event.summary ?? ''
   const isLong = text.length > 400
   const display = expanded ? text : text.slice(0, 400) + '…'
+  const animate = isLast && !revealedOutputIds.has(event.id)
 
   return (
-    <View style={styles.rowLeft}>
-      <View style={styles.agentAvatar}>
-        <Ionicons name="sparkles-outline" size={12} color={Colors.accentDeep} />
-      </View>
-      <View style={styles.bubbleReceived}>
-        <Text style={styles.bubbleText} selectable>{display}</Text>
-        {isLong && (
-          <TouchableOpacity onPress={() => setExpanded(v => !v)} activeOpacity={0.7}>
-            <Text style={styles.showMore}>{expanded ? 'Show less ↑' : 'Show more ↓'}</Text>
-          </TouchableOpacity>
-        )}
-        <Text style={styles.bubbleTime}>
-          {formatDistanceToNow(new Date(event.created_at), { addSuffix: true })}
-        </Text>
-      </View>
+    <View style={styles.outputBlock}>
+      <TerminalText
+        text={display}
+        animate={animate}
+        onDone={() => revealedOutputIds.add(event.id)}
+        style={styles.outputText}
+      />
+      {isLong && (
+        <TouchableOpacity onPress={() => setExpanded(v => !v)} activeOpacity={0.7} hitSlop={6}>
+          <Text style={styles.showMore}>{expanded ? 'Show less ↑' : 'Show more ↓'}</Text>
+        </TouchableOpacity>
+      )}
     </View>
   )
 }
 
-// ── User sent-prompt bubble (right, like WhatsApp "sent") ─────────────────────
+// ── User sent-prompt bubble (right) ───────────────────────────────────────────
 function SentBubble({ cmd }: { cmd: MobileCommand }) {
   const icon = cmd.status === 'delivered'
     ? 'checkmark-done' : cmd.status === 'pending'
     ? 'time-outline' : 'close-outline'
-  const iconColor = cmd.status === 'delivered' ? Colors.success : Colors.textTertiary
+  const iconColor = cmd.status === 'delivered' ? DarkColors.online : DarkColors.textTertiary
 
   return (
     <View style={styles.rowRight}>
@@ -92,7 +100,7 @@ function SentBubble({ cmd }: { cmd: MobileCommand }) {
   )
 }
 
-// ── Notification (centred small text) ────────────────────────────────────────
+// ── Notification (centred) ────────────────────────────────────────────────────
 function NotifyRow({ event }: { event: TerminalEvent }) {
   return (
     <View style={styles.notifyRow}>
@@ -107,7 +115,7 @@ function StopRow({ event }: { event: TerminalEvent }) {
     <View style={styles.stopRow}>
       <View style={styles.stopLine} />
       <View style={styles.stopPill}>
-        <Ionicons name="checkmark-done-circle" size={13} color={Colors.successDark} />
+        <Ionicons name="checkmark-done-circle" size={13} color={DarkColors.online} />
         <Text style={styles.stopText}>Task complete</Text>
         <Text style={styles.stopTime}>
           {formatDistanceToNow(new Date(event.created_at), { addSuffix: true })}
@@ -125,44 +133,25 @@ function RequestCard({ req, onApprove, onDeny, onOpen }: {
   onDeny:    () => void
   onOpen:    () => void
 }) {
-  const riskCfg  = Colors.risk[req.risk_level] ?? Colors.risk.low
-  const toolCfg  = Colors.tool[req.tool_name as keyof typeof Colors.tool] ?? Colors.tool.unknown
-  const iconName = TOOL_ICONS[req.tool_name as string] ?? 'cube-outline'
+  const toolTint   = DarkToolTint[req.tool_name as string] ?? DarkToolTint.unknown
+  const iconName   = TOOL_ICONS[req.tool_name as string] ?? 'cube-outline'
   const isPending  = req.status === 'pending'
   const isApproved = req.status === 'approved'
-  // Tapping the card opens the full detail/diff screen — but only when there's
-  // something worth inspecting (a diff, a command, or affected files).
   const canInspect = !!req.diff || !!req.command || (req.files_affected?.length ?? 0) > 0
 
   return (
-    <TouchableOpacity
-      style={[styles.reqCard, { borderLeftColor: riskCfg.dot }]}
-      activeOpacity={canInspect ? 0.85 : 1}
-      onPress={canInspect ? onOpen : undefined}
-    >
-      <View style={[styles.reqWhisper, { backgroundColor: riskCfg.whisper }]} />
-
+    <Card>
       {/* Tool + risk header */}
       <View style={styles.reqHeader}>
-        <View style={[styles.reqIconBox, { backgroundColor: toolCfg.bg }]}>
-          <Ionicons name={iconName} size={13} color={toolCfg.text} />
+        <View style={[styles.reqIconBox, { backgroundColor: toolTint.bg }]}>
+          <Ionicons name={iconName} size={14} color={toolTint.fg} />
         </View>
-        <Text style={[styles.reqToolName, { color: toolCfg.text }]}>{req.tool_name}</Text>
-        <RiskBadge level={req.risk_level} />
+        <Text style={styles.reqToolName}>{req.tool_name}</Text>
+        <Badge variant={RISK_VARIANT[req.risk_level] ?? 'neutral'}>{req.risk_level}</Badge>
         {!isPending && (
-          <View style={[
-            styles.decidedBadge,
-            { backgroundColor: isApproved ? Colors.risk.low.bg : Colors.dangerLight },
-          ]}>
-            <Ionicons
-              name={isApproved ? 'checkmark' : 'close'}
-              size={10}
-              color={isApproved ? Colors.successDark : Colors.danger}
-            />
-            <Text style={[styles.decidedText, { color: isApproved ? Colors.successDark : Colors.danger }]}>
-              {isApproved ? 'Approved' : 'Denied'}
-            </Text>
-          </View>
+          <Badge variant={isApproved ? 'success' : 'danger'}>
+            {isApproved ? 'Approved' : 'Denied'}
+          </Badge>
         )}
       </View>
 
@@ -176,100 +165,94 @@ function RequestCard({ req, onApprove, onDeny, onOpen }: {
         </View>
       )}
 
-      {/* Tap-to-inspect hint (full diff / details live on RequestDetail) */}
+      {/* Tap-to-inspect (full diff / details live on RequestDetail) */}
       {canInspect && (
-        <View style={styles.reqOpenHint}>
-          <Ionicons name="document-text-outline" size={12} color={Colors.textTertiary} />
-          <Text style={styles.reqOpenHintText}>
-            {req.diff ? 'View full diff' : 'View details'}
-          </Text>
-          <Ionicons name="chevron-forward" size={12} color={Colors.textTertiary} />
-        </View>
+        <TouchableOpacity style={styles.reqOpenHint} onPress={onOpen} activeOpacity={0.7}>
+          <Ionicons name="document-text-outline" size={17} color={DarkColors.textSecondary} />
+          <Text style={styles.reqOpenHintText}>{req.diff ? 'View full diff' : 'View details'}</Text>
+          <Ionicons name="chevron-forward" size={17} color={DarkColors.textSecondary} />
+        </TouchableOpacity>
       )}
 
-      {/* Action buttons (only while pending). Their own onPress stops the tap from
-          bubbling to the card's onPress, so Approve/Deny never navigates. */}
+      {/* Action buttons (only while pending) */}
       {isPending && (
         <View style={styles.reqActions}>
-          <TouchableOpacity style={styles.denyBtn} onPress={onDeny} activeOpacity={0.8}>
-            <Ionicons name="close" size={16} color={Colors.white} />
-            <Text style={styles.denyText}>Deny</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.approveBtn} onPress={onApprove} activeOpacity={0.8}>
-            <Ionicons name="checkmark" size={16} color={Colors.white} />
-            <Text style={styles.approveText}>Approve</Text>
-          </TouchableOpacity>
+          <Button variant="destructive" size="sm" icon="close" style={styles.flexBtn} onPress={onDeny}>
+            Deny
+          </Button>
+          <Button variant="success" size="sm" icon="checkmark" style={styles.flexBtn} onPress={onApprove}>
+            Approve
+          </Button>
         </View>
       )}
 
       <Text style={styles.reqTime}>
         {formatDistanceToNow(new Date(req.created_at), { addSuffix: true })}
       </Text>
-    </TouchableOpacity>
+    </Card>
   )
 }
 
-// ── Animated thinking dots ────────────────────────────────────────────────────
+// ── Animated thinking dots — plain inline (no bubble) ─────────────────────────
 function ThinkingBubble({ isPendingApproval }: { isPendingApproval: boolean }) {
-  const color = isPendingApproval ? Colors.warning : Colors.accent
+  const color = isPendingApproval ? DarkColors.unpair : DarkColors.online
   const label = isPendingApproval ? 'Waiting for approval…' : 'Thinking…'
   return (
-    <View style={styles.rowLeft}>
-      <View style={styles.agentAvatar}>
-        <Ionicons name="sparkles-outline" size={12} color={Colors.accentDeep} />
+    <View style={styles.thinkingRow}>
+      <View style={styles.thinkingDots}>
+        <View style={[styles.dot, { backgroundColor: color }]} />
+        <View style={[styles.dot, { backgroundColor: color, opacity: 0.6 }]} />
+        <View style={[styles.dot, { backgroundColor: color, opacity: 0.3 }]} />
       </View>
-      <View style={[styles.bubbleReceived, styles.thinkingBubble]}>
-        <View style={styles.thinkingDots}>
-          <View style={[styles.dot, { backgroundColor: color }]} />
-          <View style={[styles.dot, { backgroundColor: color, opacity: 0.6 }]} />
-          <View style={[styles.dot, { backgroundColor: color, opacity: 0.3 }]} />
-        </View>
-        <Text style={[styles.thinkingLabel, { color }]}>{label}</Text>
-      </View>
+      <Text style={[styles.thinkingLabel, { color }]}>{label}</Text>
     </View>
   )
 }
 
-// ── Activity bubble — compact tool_start / tool_end row ──────────────────────
-function ActivityBubble({ event }: { event: TerminalEvent }) {
-  const isStart   = event.event_type === 'tool_start'
-  const iconName  = TOOL_ICONS[event.tool_name ?? ''] ?? 'cube-outline'
-  const toolCfg   = Colors.tool[(event.tool_name ?? '') as keyof typeof Colors.tool] ?? Colors.tool.unknown
+// ── Activity bubble — compact tool_start / tool_end row ───────────────────────
+function ActivityBubble({ event, isLast }: { event: TerminalEvent; isLast: boolean }) {
+  const isStart  = event.event_type === 'tool_start'
+  const iconName = TOOL_ICONS[event.tool_name ?? ''] ?? 'cube-outline'
+  const toolTint = DarkToolTint[(event.tool_name ?? '') as string] ?? DarkToolTint.unknown
+  const fadeIn   = isLast && !seenActivityIds.has(event.id)
+
+  useEffect(() => { seenActivityIds.add(event.id) }, [event.id])
+
+  const Row = fadeIn ? Animated.View : View
+  const rowProps = fadeIn ? { entering: FadeInDown.duration(220) } : {}
 
   return (
-    <View style={styles.activityRow}>
-      <View style={[styles.activityIcon, { backgroundColor: toolCfg.bg }]}>
-        <Ionicons name={iconName} size={11} color={toolCfg.text} />
+    <Row style={styles.activityRow} {...rowProps}>
+      <View style={[styles.activityIcon, { backgroundColor: toolTint.bg }]}>
+        <Ionicons name={iconName} size={11} color={toolTint.fg} />
       </View>
       <Text style={styles.activityText} numberOfLines={2}>
-        <Text style={{ fontWeight: '600', color: toolCfg.text }}>{event.tool_name}</Text>
+        <Text style={{ fontWeight: '600', color: toolTint.fg }}>{event.tool_name}</Text>
         {event.summary ? `  ${event.summary}` : ''}
       </Text>
       <View style={[styles.activityBadge, isStart ? styles.activityBadgeStart : styles.activityBadgeDone]}>
-        <Text style={styles.activityBadgeText}>{isStart ? 'running' : 'done'}</Text>
+        <Text style={[styles.activityBadgeText, { color: isStart ? DarkColors.unpair : DarkColors.online }]}>
+          {isStart ? 'running' : 'done'}
+        </Text>
       </View>
-    </View>
+    </Row>
   )
 }
 
 // ── Feed item renderer ────────────────────────────────────────────────────────
-// Memoized so a feed change (poll, Realtime append) only re-renders the rows that
-// actually changed — not every visible bubble. `onApprove`/`onDeny` are stable
-// (useCallback in the screen) and item objects are reused across renders, so the
-// default shallow prop compare is enough.
-const FeedRow = React.memo(function FeedRow({ item, onApprove, onDeny, onOpen, onAnswer }: {
+const FeedRow = React.memo(function FeedRow({ item, isLast, onApprove, onDeny, onOpen, onAnswer }: {
   item:      ChatItem
+  isLast:    boolean
   onApprove: (id: string) => void
   onDeny:    (id: string) => void
   onOpen:    (id: string) => void
   onAnswer:  (id: string, answers: SelectedAnswer[]) => void
 }) {
-  if (item.kind === 'output')   return <OutputBubble  event={item.event} />
-  if (item.kind === 'activity') return <ActivityBubble event={item.event} />
-  if (item.kind === 'sent')     return <SentBubble    cmd={item.cmd} />
-  if (item.kind === 'notify')   return <NotifyRow     event={item.event} />
-  if (item.kind === 'stop')     return <StopRow       event={item.event} />
-  // request row — questions render the QuestionCard, approvals the existing card
+  if (item.kind === 'output')   return <OutputBubble   event={item.event} isLast={isLast} />
+  if (item.kind === 'activity') return <ActivityBubble event={item.event} isLast={isLast} />
+  if (item.kind === 'sent')     return <SentBubble     cmd={item.cmd} />
+  if (item.kind === 'notify')   return <NotifyRow      event={item.event} />
+  if (item.kind === 'stop')     return <StopRow        event={item.event} />
   if (item.req.kind === 'question') {
     return <QuestionCard request={item.req} onSubmit={(answers) => onAnswer(item.req.id, answers)} />
   }
@@ -295,34 +278,18 @@ export function ChatScreen() {
   const answer  = useAnswerRequest()
   const sendPmt = useSendPrompt()
 
-  // Live session data — route.params.status / machineIsOnline are stale snapshots
-  // captured at navigation time. A session can go idle/finished while the user is
-  // reading the chat, or be finished already when they open it, which would lock the
-  // compose bar. Use the live sessions query as the source of truth.
   const { data: sessions = [] } = useSessions()
   const liveSession    = sessions.find(s => s.session_id === sessionId)
   const liveStatus     = liveSession?.status     ?? status
   const liveOnline     = liveSession?.machine_is_online ?? machineIsOnline
-  // The CLI is "closed" only when we're confident: the desktop reported it dead
-  // AND it isn't currently active. Active sessions are never blocked (avoids a
-  // false-block in the brief window before the first liveness report).
   const cliClosed      = liveSession?.cli_alive === false && liveStatus !== 'active'
-  // Mobile support for this harness is off on the desktop — the desktop hasn't
-  // installed the hooks that inject prompts, so sending would go nowhere. Only
-  // block on a confirmed `false` (undefined = unknown → let the server decide).
   const harnessOff     = liveSession?.harness_enabled === false
 
-  // Instant composer lock/unlock when this session's harness is toggled on the
-  // desktop, instead of waiting for the next 10s sessions poll.
   useMachineChannel(liveSession?.machine_id)
 
   const [prompt, setPrompt] = useState(prefill ?? '')
   const listRef = useRef<FlatList>(null)
 
-  // Auto-scroll only follows the live edge when the user is already near the
-  // bottom. While they scroll up to read history, new rows (Realtime/poll) must
-  // NOT yank them down — they get a "jump to latest" button instead. This is the
-  // fix for the "scroll up and it snaps back down" bug.
   const isNearBottomRef    = useRef(true)
   const didInitialScroll   = useRef(false)
   const [showJumpToLatest, setShowJumpToLatest] = useState(false)
@@ -332,7 +299,7 @@ export function ChatScreen() {
     const distanceFromBottom = contentSize.height - (contentOffset.y + layoutMeasurement.height)
     const near = distanceFromBottom < 120
     isNearBottomRef.current = near
-    setShowJumpToLatest(!near)   // React bails out if the value is unchanged
+    setShowJumpToLatest(!near)
   }, [])
 
   const scrollToLatest = useCallback((animated = true) => {
@@ -341,12 +308,10 @@ export function ChatScreen() {
     setShowJumpToLatest(false)
   }, [])
 
-  // When returning from FileBrowser, pick up prefill set on our route params
   useFocusEffect(useCallback(() => {
     if (route.params.prefill) setPrompt(route.params.prefill)
   }, [route.params.prefill])) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Follow the live edge only when the user is already there.
   useEffect(() => {
     if (feed.length > 0 && isNearBottomRef.current) {
       requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }))
@@ -356,6 +321,7 @@ export function ChatScreen() {
   const pendingCount = feed.filter(i => i.kind === 'request' && i.req.status === 'pending').length
   const isActive     = liveStatus === 'active'
   const lastItem     = feed[feed.length - 1]
+  const lastId       = lastItem?.id
   const lastIsStop   = lastItem?.kind === 'stop'
   const showThinking = isActive && !lastIsStop
 
@@ -367,13 +333,18 @@ export function ChatScreen() {
     [answer],
   )
 
-  // Stable renderItem so ChatScreen re-renders (every feed update, prompt keypress,
-  // scroll tick) don't hand FlatList a new function and re-render visible cells.
   const renderItem = useCallback(
     ({ item }: { item: ChatItem }) => (
-      <FeedRow item={item} onApprove={handleApprove} onDeny={handleDeny} onOpen={handleOpen} onAnswer={handleAnswer} />
+      <FeedRow
+        item={item}
+        isLast={item.id === lastId}
+        onApprove={handleApprove}
+        onDeny={handleDeny}
+        onOpen={handleOpen}
+        onAnswer={handleAnswer}
+      />
     ),
-    [handleApprove, handleDeny, handleOpen, handleAnswer],
+    [handleApprove, handleDeny, handleOpen, handleAnswer, lastId],
   )
 
   async function handleSend() {
@@ -388,80 +359,67 @@ export function ChatScreen() {
   }
 
   const dirLabel = dirName(cwd)
-  // Allow prompting when the machine is online, no approvals pending, and the CLI
-  // is still open. A closed CLI is blocked — resuming it would spawn a new
-  // unattended agent, which is dangerous.
   const canType  = liveOnline && pendingCount === 0 && !cliClosed && !harnessOff
   const canSend  = prompt.trim().length > 0 && !sendPmt.isPending && canType
 
-  return (
-    // GradientBackground provides flex:1 + background colour
-    <GradientBackground>
-      <StatusBar barStyle="dark-content" translucent backgroundColor="transparent" />
+  const statusColor = isActive ? DarkColors.online : liveStatus === 'idle' ? DarkColors.unpair : DarkColors.textTertiary
+  const statusLabel = isActive ? 'Active' : liveStatus === 'idle' ? 'Idle' : 'Finished'
 
-      {/*
-        KeyboardAvoidingView MUST be flex:1 and sit INSIDE GradientBackground.
-        On iOS use 'padding' so the compose bar lifts with the keyboard.
-        On Android use 'height' (adjustResize in manifest also helps but 'height' is safer).
-      */}
+  return (
+    <GradientBackground style={styles.root}>
+      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+
       <KeyboardAvoidingView
         style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        // Android manifest already uses adjustResize — letting it handle the
+        // keyboard alone avoids the double-count that left the compose bar sitting
+        // higher after dismissing the keyboard. iOS still needs 'padding'.
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={0}
       >
 
-        {/* ── Header ── */}
-        <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
+        {/* ── Header (refer Details: BackButton + pill + icon btn) ── */}
+        <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
+          <BackButton />
+          <View style={styles.titlePill}>
+            <HarnessAvatar
+              harness={harness}
+              dir={dirLabel}
+              statusColor={statusColor}
+              isActive={isActive}
+              size={34}
+            />
+            <Text style={styles.titleText} numberOfLines={1}>{dirLabel}</Text>
+            {isRefetching && <ActivityIndicator size="small" color={DarkColors.textSecondary} />}
+          </View>
           <TouchableOpacity
-            onPress={() => navigation.goBack()}
-            style={styles.backBtn}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            activeOpacity={0.7}
+            style={[styles.iconBtn, !machineIsOnline && { opacity: 0.4 }]}
+            onPress={() => navigation.navigate('FileBrowser', { sessionId, machineLabel, cwd })}
+            disabled={!machineIsOnline}
+            activeOpacity={0.75}
           >
-            <Ionicons name="chevron-back" size={22} color={Colors.textSecondary} />
+            <Ionicons name="folder-outline" size={18} color={DarkColors.textSecondary} />
           </TouchableOpacity>
-
-          <View style={styles.headerCenter}>
-            <View style={styles.headerTitleRow}>
-              <Text style={styles.headerTitle} numberOfLines={1}>{dirLabel}</Text>
-              <HarnessBadge harness={harness} size="xs" />
-            </View>
-            <Text style={styles.headerSub} numberOfLines={1}>{machineLabel}{cwd ? ` · ${cwd}` : ''}</Text>
-          </View>
-
-          <View style={styles.headerRight}>
-            {isRefetching && <ActivityIndicator size="small" color={Colors.textTertiary} />}
-            <TouchableOpacity
-              style={[styles.headerBtn, !machineIsOnline && { opacity: 0.4 }]}
-              onPress={() => navigation.navigate('FileBrowser', { sessionId, machineLabel, cwd })}
-              disabled={!machineIsOnline}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="folder-outline" size={17} color={Colors.textSecondary} />
-            </TouchableOpacity>
-          </View>
         </View>
 
         {/* ── Status strip ── */}
         <View style={styles.statusStrip}>
-          <View style={[styles.statusDot, { backgroundColor: isActive ? Colors.success : liveStatus === 'idle' ? Colors.warning : Colors.textTertiary }]} />
-          <Text style={[styles.statusText, { color: isActive ? Colors.success : liveStatus === 'idle' ? Colors.warning : Colors.textTertiary }]}>
-            {isActive ? 'Active' : liveStatus === 'idle' ? 'Idle' : 'Finished'}
-          </Text>
+          <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
+          <Text style={[styles.statusText, { color: statusColor }]}>{statusLabel}</Text>
+          <Text style={styles.statusSep}>·</Text>
+          <Text style={styles.statusMachine} numberOfLines={1}>{machineLabel}</Text>
           {!liveOnline && <Text style={styles.offlineChip}>machine offline</Text>}
         </View>
 
         {/* ── Message feed ── */}
         {isLoading && feed.length === 0 ? (
           <View style={styles.loadingCenter}>
-            <ActivityIndicator size="large" color={Colors.accent} />
+            <ActivityIndicator size="large" color={DarkColors.online} />
             <Text style={styles.loadingText}>Loading conversation…</Text>
           </View>
         ) : (
           <FlatList
             ref={listRef}
-            // flex:1 is the critical fix — without it, FlatList expands to full
-            // content height and pushes the compose bar below the screen
             style={styles.flex}
             data={feed}
             keyExtractor={item => item.id}
@@ -470,22 +428,15 @@ export function ChatScreen() {
               styles.listContent,
               feed.length === 0 && styles.listContentEmpty,
             ]}
-            // Track scroll position so auto-follow only happens at the live edge
             onScroll={handleScroll}
             scrollEventThrottle={16}
-            // Keeps the viewport anchored when OLDER rows are prepended on
-            // scroll-up, so loading history doesn't jump the list (index 1 skips
-            // the loading-older header).
             maintainVisibleContentPosition={{ minIndexForVisible: 1 }}
-            // Load older history when the user reaches the top (WhatsApp style)
             onStartReached={fetchOlder}
             onStartReachedThreshold={0.3}
             ListHeaderComponent={isFetchingOlder
-              ? <View style={styles.loadingOlder}><ActivityIndicator size="small" color={Colors.textTertiary} /></View>
+              ? <View style={styles.loadingOlder}><ActivityIndicator size="small" color={DarkColors.textTertiary} /></View>
               : null
             }
-            // Snap to bottom on first render only; afterwards respect the user's
-            // position (the unconditional jump-to-bottom here was the scroll bug).
             onContentSizeChange={() => {
               if (!didInitialScroll.current && feed.length > 0) {
                 listRef.current?.scrollToEnd({ animated: false })
@@ -494,7 +445,6 @@ export function ChatScreen() {
                 listRef.current?.scrollToEnd({ animated: false })
               }
             }}
-            // Virtualization tuning — fewer mounted rows, smoother scroll
             windowSize={11}
             maxToRenderPerBatch={8}
             updateCellsBatchingPeriod={50}
@@ -507,7 +457,7 @@ export function ChatScreen() {
             ListEmptyComponent={
               !showThinking ? (
                 <View style={styles.empty}>
-                  <Ionicons name="chatbubbles-outline" size={40} color={Colors.accentDeep} />
+                  <Ionicons name="chatbubbles-outline" size={40} color={DarkColors.textSecondary} />
                   <Text style={styles.emptyTitle}>No activity yet</Text>
                   <Text style={styles.emptySub}>
                     Reasoning and tool calls will appear here as the agent works.
@@ -518,24 +468,23 @@ export function ChatScreen() {
           />
         )}
 
-        {/* ── Jump to latest (shown only when scrolled away from the live edge) ── */}
+        {/* ── Jump to latest ── */}
         {showJumpToLatest && feed.length > 0 && (
           <TouchableOpacity
-            style={styles.jumpToLatest}
+            style={[styles.jumpToLatest, { bottom: insets.bottom + 80 }]}
             onPress={() => scrollToLatest(true)}
             activeOpacity={0.85}
           >
-            <Ionicons name="arrow-down" size={16} color={Colors.white} />
+            <Ionicons name="arrow-down" size={16} color="#FFFFFF" />
             <Text style={styles.jumpToLatestText}>Latest</Text>
           </TouchableOpacity>
         )}
 
-        {/* ── Compose bar — always anchored above the floating tab bar ── */}
-        <View style={[styles.compose, { paddingBottom: TAB_BOTTOM_INSET }]}>
+        {/* ── Compose bar ── */}
+        <View style={[styles.compose, { paddingBottom: insets.bottom + Spacing.px20 }]}>
           {cliClosed ? (
-            // CLI was closed — prompting is blocked (resuming it is dangerous)
             <View style={styles.closedNote}>
-              <Ionicons name="lock-closed" size={16} color={Colors.danger} />
+              <Ionicons name="lock-closed" size={16} color={DarkColors.danger} />
               <View style={styles.closedTextWrap}>
                 <Text style={styles.closedTitle}>CLI is closed</Text>
                 <Text style={styles.closedSub}>
@@ -545,11 +494,10 @@ export function ChatScreen() {
               </View>
             </View>
           ) : harnessOff ? (
-            // Mobile support for this harness is toggled off on the desktop
             <View style={styles.harnessOffNote}>
-              <Ionicons name="power" size={16} color={Colors.warning} />
+              <Ionicons name="power" size={16} color={DarkColors.unpair} />
               <View style={styles.closedTextWrap}>
-                <Text style={[styles.closedTitle, { color: Colors.warning }]}>Mobile support is off</Text>
+                <Text style={[styles.closedTitle, { color: DarkColors.unpair }]}>Mobile support is off</Text>
                 <Text style={styles.closedSub}>
                   Turn on mobile support for {harness} in the Vibe Remote desktop app
                   to send prompts to this session.
@@ -557,9 +505,8 @@ export function ChatScreen() {
               </View>
             </View>
           ) : pendingCount > 0 ? (
-            // Approval pending — show a note instead of the input
             <View style={styles.pendingNote}>
-              <Ionicons name="hourglass-outline" size={14} color={Colors.warning} />
+              <Ionicons name="hourglass-outline" size={14} color={DarkColors.unpair} />
               <Text style={styles.pendingText}>
                 {pendingCount} approval{pendingCount > 1 ? 's' : ''} pending — scroll up to decide
               </Text>
@@ -570,11 +517,8 @@ export function ChatScreen() {
                 style={styles.input}
                 value={prompt}
                 onChangeText={setPrompt}
-                placeholder={
-                  !liveOnline ? 'Machine offline — cannot send'
-                  : 'Send a prompt…'
-                }
-                placeholderTextColor={Colors.textTertiary}
+                placeholder={!liveOnline ? 'Machine offline — cannot send' : 'Send a prompt…'}
+                placeholderTextColor={DarkColors.textTertiary}
                 multiline
                 editable={canType}
                 maxLength={2000}
@@ -587,8 +531,8 @@ export function ChatScreen() {
                 activeOpacity={0.8}
               >
                 {sendPmt.isPending
-                  ? <ActivityIndicator size="small" color={Colors.white} />
-                  : <Ionicons name="arrow-up" size={20} color={canSend ? Colors.white : Colors.textTertiary} />
+                  ? <ActivityIndicator size="small" color="#FFFFFF" />
+                  : <Ionicons name="arrow-up" size={20} color={canSend ? '#FFFFFF' : DarkColors.textTertiary} />
                 }
               </TouchableOpacity>
             </View>
@@ -602,292 +546,177 @@ export function ChatScreen() {
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
+  root: { backgroundColor: DarkColors.bg },
   flex: { flex: 1 },
+  flexBtn: { flex: 1 },
 
-  // ── Header ──────────────────────────────────────────────────────────────────
+  // ── Header ──
   header: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: Spacing.px8, paddingBottom: Spacing.px8,
-    borderBottomWidth: 1, borderBottomColor: Colors.borderHairline,
-    backgroundColor: Colors.surfaceGlassStrong,
-    gap: Spacing.px4,
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.px10,
+    paddingHorizontal: Spacing.px20, paddingBottom: Spacing.px10,
   },
-  backBtn: {
-    width: 40, height: 40,
+  titlePill: {
+    flex: 1, height: 48, flexDirection: 'row', alignItems: 'center', gap: Spacing.px8,
+    paddingLeft: 7, paddingRight: Spacing.px16, borderRadius: Radius.full,
+    backgroundColor: DarkColors.surfaceRaised,
+  },
+  titleText: { fontSize: FontSize.cardTitle, fontWeight: '600', color: DarkColors.textPrimary, fontFamily: FontFamily.googleSans, flexShrink: 1 },
+  iconBtn: {
+    width: 48, height: 48, borderRadius: Radius.full,
+    backgroundColor: DarkColors.surfaceRaised,
     alignItems: 'center', justifyContent: 'center', flexShrink: 0,
   },
-  headerCenter: { flex: 1, gap: 2 },
-  headerTitleRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.px8 },
-  headerTitle: {
-    fontSize: FontSize.cardTitle, fontWeight: '700', color: Colors.textPrimary, flexShrink: 1,
-  },
-  headerSub: { fontSize: FontSize.metadata, color: Colors.textTertiary },
-  headerRight: { flexDirection: 'row', alignItems: 'center', gap: Spacing.px8, flexShrink: 0 },
-  headerBtn: {
-    width: 36, height: 36,
-    alignItems: 'center', justifyContent: 'center',
-    borderRadius: Radius.sm, borderWidth: 1, borderColor: Colors.borderHairline,
-    backgroundColor: Colors.surfaceGlassStrong,
-  },
 
-  // ── Status strip ────────────────────────────────────────────────────────────
+  // ── Status strip ──
   statusStrip: {
     flexDirection: 'row', alignItems: 'center', gap: Spacing.px6,
     paddingHorizontal: Spacing.px20, paddingVertical: 6,
-    backgroundColor: Colors.cream,
-    borderBottomWidth: 1, borderBottomColor: Colors.borderHairline,
+    backgroundColor: DarkColors.surface,
+    borderBottomWidth: 1, borderBottomColor: DarkColors.border,
   },
   statusDot: { width: 6, height: 6, borderRadius: Radius.full },
-  statusText: { fontSize: FontSize.metadata, fontWeight: '500' },
+  statusText: { fontSize: FontSize.metadata, fontWeight: '500', fontFamily: FontFamily.googleSans },
+  statusSep: { fontSize: FontSize.metadata, color: DarkColors.textTertiary },
+  statusMachine: { fontSize: FontSize.metadata, color: DarkColors.textTertiary, flex: 1, fontFamily: FontFamily.googleSans },
   offlineChip: {
-    fontSize: FontSize.microLabel, color: Colors.danger, fontWeight: '600',
-    marginLeft: Spacing.px8, backgroundColor: Colors.dangerLight,
+    fontSize: FontSize.microLabel, color: DarkColors.danger, fontWeight: '600',
+    marginLeft: Spacing.px8, backgroundColor: 'rgba(239,83,80,0.15)',
     paddingHorizontal: 6, paddingVertical: 2, borderRadius: Radius.full,
   },
 
-  // ── Feed ────────────────────────────────────────────────────────────────────
-  loadingCenter: {
-    flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.px12,
-  },
-  loadingText: { fontSize: FontSize.label, color: Colors.textTertiary },
+  // ── Feed ──
+  loadingCenter: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.px12 },
+  loadingText: { fontSize: FontSize.label, color: DarkColors.textTertiary, fontFamily: FontFamily.googleSans },
   loadingOlder: { paddingVertical: Spacing.px12, alignItems: 'center' },
 
-  // ── Jump to latest pill ──────────────────────────────────────────────────────
   jumpToLatest: {
-    position: 'absolute', alignSelf: 'center', bottom: Spacing.px12,
+    position: 'absolute', alignSelf: 'center',
     flexDirection: 'row', alignItems: 'center', gap: Spacing.px4,
-    backgroundColor: Colors.accentDeep,
+    backgroundColor: DarkColors.badgeBg,
     borderRadius: Radius.full,
     paddingHorizontal: Spacing.px16, paddingVertical: Spacing.px8,
-    ...Shadow.inkPill,
   },
-  jumpToLatestText: { fontSize: FontSize.label, color: Colors.white, fontWeight: '600' },
+  jumpToLatestText: { fontSize: FontSize.label, color: '#FFFFFF', fontWeight: '600', fontFamily: FontFamily.googleSans },
 
+  // One shared gutter + one uniform vertical rhythm for every feed item.
   listContent: {
-    paddingHorizontal: Spacing.px12,
-    paddingTop: Spacing.px12,
-    paddingBottom: Spacing.px16,
-    gap: Spacing.px4,
+    paddingHorizontal: Spacing.px16, paddingTop: Spacing.px12,
+    paddingBottom: Spacing.px16, gap: Spacing.px12,
   },
-  listContentEmpty: {
-    flexGrow: 1, justifyContent: 'center',
-  },
+  listContentEmpty: { flexGrow: 1, justifyContent: 'center' },
 
-  // ── Empty ────────────────────────────────────────────────────────────────────
-  empty: {
-    alignItems: 'center', paddingHorizontal: Spacing.px32, gap: Spacing.px12,
-  },
-  emptyTitle: {
-    fontSize: FontSize.displayM, fontWeight: '600', color: Colors.textPrimary,
-    fontFamily: FontFamily.serifBold,
-  },
-  emptySub: {
-    fontSize: FontSize.body, color: Colors.textSecondary,
-    textAlign: 'center', lineHeight: 22, maxWidth: 260,
-  },
+  // ── Empty ──
+  empty: { alignItems: 'center', paddingHorizontal: Spacing.px32, gap: Spacing.px12 },
+  emptyTitle: { fontSize: FontSize.displayM, fontWeight: '600', color: DarkColors.textPrimary, fontFamily: FontFamily.googleSans },
+  emptySub: { fontSize: FontSize.body, color: DarkColors.textSecondary, fontFamily: FontFamily.googleSans, textAlign: 'center', lineHeight: 22, maxWidth: 260 },
 
-  // ── Row wrappers ─────────────────────────────────────────────────────────────
-  rowLeft: {
-    flexDirection: 'row', alignItems: 'flex-end', gap: Spacing.px8,
-    marginVertical: 3, paddingRight: 60,
-  },
-  rowRight: {
-    flexDirection: 'row', justifyContent: 'flex-end',
-    marginVertical: 3, paddingLeft: 60,
-  },
+  // ── Row wrappers ──
+  rowRight: { flexDirection: 'row', justifyContent: 'flex-end', paddingLeft: 48 },
 
-  // ── Agent avatar ─────────────────────────────────────────────────────────────
-  agentAvatar: {
-    width: 26, height: 26, borderRadius: Radius.full,
-    backgroundColor: Colors.accentLight,
-    alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-  },
+  // ── Agent reasoning — plain full-width CLI output (aligned to gutter) ──
+  outputBlock: { gap: 4 },
+  outputText: { color: DarkColors.textPrimary, lineHeight: 21 },
+  showMore: { fontSize: FontSize.metadata, color: DarkColors.online, fontWeight: '500', marginTop: 2 },
 
-  // ── Received bubble (agent reasoning) ────────────────────────────────────────
-  bubbleReceived: {
-    backgroundColor: Colors.surfaceGlassStrong,
-    borderRadius: Radius.md, borderTopLeftRadius: 4,
-    borderWidth: 1, borderColor: Colors.borderHairline, borderTopColor: Colors.borderGlass,
-    paddingHorizontal: Spacing.px12, paddingVertical: Spacing.px8,
-    gap: 4,
-    flexShrink: 1,
-    ...Shadow.glassLow,
-  },
-  bubbleText: {
-    fontSize: FontSize.body, color: Colors.textSecondary,
-    lineHeight: 22, fontFamily: FontFamily.sans,
-  },
-  showMore: { fontSize: FontSize.metadata, color: Colors.accent, fontWeight: '500' },
-  bubbleTime: { fontSize: FontSize.metadata, color: Colors.textTertiary, alignSelf: 'flex-end' },
-
-  // ── Sent bubble (user prompt) ─────────────────────────────────────────────────
+  // ── Sent bubble (user prompt) ──
   bubbleSent: {
-    backgroundColor: Colors.accentDeep,
+    backgroundColor: DarkColors.surfaceRaised,
     borderRadius: Radius.md, borderTopRightRadius: 4,
     paddingHorizontal: Spacing.px12, paddingVertical: Spacing.px8,
     gap: 4, flexShrink: 1,
-    ...Shadow.inkPill,
   },
-  bubbleSentText: {
-    fontSize: FontSize.body, color: Colors.white, lineHeight: 22,
-  },
-  bubbleSentMeta: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 4,
-  },
-  bubbleSentTime: { fontSize: FontSize.metadata, color: 'rgba(255,255,255,0.6)' },
+  bubbleSentText: { fontSize: FontSize.body, color: DarkColors.textPrimary, lineHeight: 22, fontFamily: FontFamily.googleSans },
+  bubbleSentMeta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 4 },
+  bubbleSentTime: { fontSize: FontSize.metadata, color: 'rgba(255,255,255,0.5)' },
 
-  // ── Notification ─────────────────────────────────────────────────────────────
-  notifyRow: {
-    alignItems: 'center', paddingVertical: Spacing.px8, paddingHorizontal: Spacing.px32,
-  },
-  notifyText: {
-    fontSize: FontSize.metadata, color: Colors.textTertiary,
-    fontStyle: 'italic', textAlign: 'center',
-  },
+  // ── Notification ──
+  notifyRow: { alignItems: 'center', paddingHorizontal: Spacing.px16 },
+  notifyText: { fontSize: FontSize.metadata, color: DarkColors.textTertiary, fontStyle: 'italic', textAlign: 'center' },
 
-  // ── Stop divider ─────────────────────────────────────────────────────────────
-  stopRow: {
-    flexDirection: 'row', alignItems: 'center',
-    gap: Spacing.px8, marginVertical: Spacing.px16,
-  },
-  stopLine: { flex: 1, height: 1, backgroundColor: Colors.risk.low.border },
+  // ── Stop divider ──
+  stopRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.px8, marginVertical: Spacing.px4 },
+  stopLine: { flex: 1, height: 1, backgroundColor: DarkColors.border },
   stopPill: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
-    backgroundColor: Colors.risk.low.bg,
-    borderRadius: Radius.full, borderWidth: 1, borderColor: Colors.risk.low.border,
+    backgroundColor: DarkColors.surfaceRaised,
+    borderRadius: Radius.full,
     paddingHorizontal: Spacing.px12, paddingVertical: 4,
   },
-  stopText: { fontSize: FontSize.label, fontWeight: '600', color: Colors.successDark },
-  stopTime: { fontSize: FontSize.metadata, color: Colors.successDark, opacity: 0.7 },
+  stopText: { fontSize: FontSize.label, fontWeight: '600', color: DarkColors.online, fontFamily: FontFamily.googleSans },
+  stopTime: { fontSize: FontSize.metadata, color: DarkColors.online, opacity: 0.7 },
 
-  // ── Tool request card ─────────────────────────────────────────────────────────
-  reqCard: {
-    backgroundColor: Colors.bgPrimary,
-    borderRadius: Radius.md, borderWidth: 1,
-    borderColor: Colors.borderHairline, borderLeftWidth: 3,
-    overflow: 'hidden', padding: Spacing.px12, gap: Spacing.px8,
-    marginVertical: 4,
-    ...Shadow.glassLow,
-  },
-  reqWhisper: { position: 'absolute', top: 0, left: 0, right: 0, height: 36 },
+  // ── Tool request card ──
   reqHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.px8 },
   reqIconBox: {
     width: 24, height: 24, borderRadius: Radius.xs,
     alignItems: 'center', justifyContent: 'center', flexShrink: 0,
   },
-  reqToolName: { fontSize: FontSize.label, fontWeight: '600', fontStyle: 'italic', flex: 1 },
-  decidedBadge: {
-    flexDirection: 'row', alignItems: 'center', gap: 3,
-    borderRadius: Radius.full, paddingHorizontal: 6, paddingVertical: 2,
-  },
-  decidedText: { fontSize: FontSize.metadata, fontWeight: '600' },
-  reqSummary: {
-    fontSize: FontSize.label, color: Colors.textSecondary, lineHeight: 18,
-    fontFamily: FontFamily.mono,
-  },
+  reqToolName: { fontSize: FontSize.label, fontWeight: '700', color: DarkColors.textPrimary, fontFamily: FontFamily.googleSans, flex: 1 },
+  reqSummary: { fontSize: FontSize.label, color: DarkColors.textSecondary, lineHeight: 18, fontFamily: FontFamily.mono },
   reqCode: {
-    backgroundColor: Colors.codeBg, borderRadius: Radius.xs,
+    backgroundColor: DarkColors.bg, borderRadius: Radius.xs,
     paddingHorizontal: Spacing.px8, paddingVertical: Spacing.px4,
   },
-  reqCodeText: {
-    fontFamily: FontFamily.mono, fontSize: FontSize.monoSmall,
-    color: Colors.codeText, lineHeight: 17,
-  },
+  reqCodeText: { fontFamily: FontFamily.mono, fontSize: FontSize.monoSmall, color: DarkColors.textPrimary, lineHeight: 17 },
   reqOpenHint: {
-    flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2,
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.px8, marginTop: 2,
+    paddingVertical: Spacing.px10, paddingHorizontal: Spacing.px12,
+    backgroundColor: DarkColors.surfaceRaised, borderRadius: Radius.sm,
   },
-  reqOpenHintText: {
-    flex: 1, fontSize: FontSize.metadata, color: Colors.textTertiary, fontWeight: '500',
-  },
-  reqActions: {
-    flexDirection: 'row', gap: Spacing.px8, marginTop: Spacing.px4,
-  },
-  denyBtn: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: Spacing.px4, height: 44, borderRadius: Radius.full,
-    backgroundColor: Colors.danger,
-  },
-  denyText: { fontSize: FontSize.label, fontWeight: '600', color: Colors.white },
-  approveBtn: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: Spacing.px4, height: 44, borderRadius: Radius.full,
-    backgroundColor: Colors.successDark,
-    ...Shadow.inkPill,
-  },
-  approveText: { fontSize: FontSize.label, fontWeight: '600', color: Colors.white },
-  reqTime: { fontSize: FontSize.metadata, color: Colors.textTertiary },
+  reqOpenHintText: { flex: 1, fontSize: FontSize.label, color: DarkColors.textSecondary, fontWeight: '600', fontFamily: FontFamily.googleSans },
+  reqActions: { flexDirection: 'row', gap: Spacing.px8, marginTop: Spacing.px4 },
+  reqTime: { fontSize: FontSize.microLabel, color: DarkColors.textTertiary, alignSelf: 'flex-end' },
 
-  // ── Activity bubble (tool_start / tool_end) ──────────────────────────────────
-  activityRow: {
-    flexDirection: 'row', alignItems: 'center', gap: Spacing.px8,
-    paddingVertical: 5, paddingHorizontal: Spacing.px4,
-    marginVertical: 2,
-  },
-  activityIcon: {
-    width: 22, height: 22, borderRadius: Radius.xs,
-    alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-  },
-  activityText: {
-    flex: 1, fontSize: FontSize.metadata, color: Colors.textTertiary,
-    fontFamily: FontFamily.mono,
-  },
-  activityBadge: {
-    borderRadius: Radius.full, paddingHorizontal: 6, paddingVertical: 2, flexShrink: 0,
-  },
-  activityBadgeStart: { backgroundColor: Colors.creamDeep },
-  activityBadgeDone:  { backgroundColor: Colors.risk.low.bg },
-  activityBadgeText:  { fontSize: 10, fontWeight: '600', color: Colors.textTertiary },
+  // ── Activity row (aligned to gutter) ──
+  activityRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.px8, marginVertical: Spacing.px6 },
+  activityIcon: { width: 22, height: 22, borderRadius: Radius.xs, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  activityText: { flex: 1, fontSize: FontSize.metadata, color: DarkColors.textSecondary, fontFamily: FontFamily.mono },
+  activityBadge: { borderRadius: Radius.full, paddingHorizontal: 6, paddingVertical: 2, flexShrink: 0 },
+  activityBadgeStart: { backgroundColor: 'rgba(217,164,65,0.18)' },
+  activityBadgeDone:  { backgroundColor: 'rgba(39,224,126,0.18)' },
+  activityBadgeText: { fontSize: 10, fontWeight: '600' },
 
-  // ── Thinking bubble ───────────────────────────────────────────────────────────
-  thinkingBubble: { flexDirection: 'row', alignItems: 'center', gap: Spacing.px8 },
+  // ── Thinking (plain inline) ──
+  thinkingRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.px8, paddingVertical: Spacing.px8, paddingLeft: Spacing.px12 },
   thinkingDots: { flexDirection: 'row', gap: 4 },
-  dot: { width: 7, height: 7, borderRadius: Radius.full, backgroundColor: Colors.accent },
-  thinkingLabel: { fontSize: FontSize.label, fontStyle: 'italic' },
+  dot: { width: 7, height: 7, borderRadius: Radius.full },
+  thinkingLabel: { fontSize: FontSize.label, fontStyle: 'italic', fontFamily: FontFamily.googleSans },
 
-  // ── Compose bar ───────────────────────────────────────────────────────────────
+  // ── Compose bar ──
+  // No filled band — blends with the chat background (Telegram-style)
   compose: {
-    paddingHorizontal: Spacing.px12,
-    paddingTop: Spacing.px8,
-    borderTopWidth: 1,
-    borderTopColor: Colors.borderHairline,
-    backgroundColor: Colors.surfaceGlassStrong,
+    paddingHorizontal: Spacing.px12, paddingTop: Spacing.px8,
+    backgroundColor: 'transparent',
   },
   inputRow: { flexDirection: 'row', alignItems: 'flex-end', gap: Spacing.px8 },
   input: {
-    flex: 1,
-    minHeight: 44, maxHeight: 120,
-    backgroundColor: Colors.bgPrimary,
+    flex: 1, minHeight: 44, maxHeight: 120,
+    backgroundColor: DarkColors.surfaceRaised,
     borderRadius: Radius.xl,
-    borderWidth: 1, borderColor: Colors.borderHairline, borderTopColor: Colors.borderGlass,
+    borderWidth: 1, borderColor: DarkColors.borderMid,
     paddingHorizontal: Spacing.px16, paddingVertical: Spacing.px12,
-    fontSize: FontSize.body, color: Colors.textPrimary,
-    fontFamily: FontFamily.sans, lineHeight: 20,
+    fontSize: FontSize.body, color: DarkColors.textPrimary,
+    fontFamily: FontFamily.googleSans, lineHeight: 20,
   },
   sendBtn: {
     width: 44, height: 44, borderRadius: Radius.full,
-    backgroundColor: Colors.accentDeep,
+    backgroundColor: DarkColors.badgeBg,
     alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-    ...Shadow.inkPill,
   },
-  sendBtnDisabled: {
-    backgroundColor: Colors.surfaceGlassStrong, shadowOpacity: 0, elevation: 0,
-  },
-  pendingNote: {
-    flexDirection: 'row', alignItems: 'center', gap: Spacing.px8,
-    paddingVertical: Spacing.px12, justifyContent: 'center',
-  },
-  pendingText: { fontSize: FontSize.label, color: Colors.warning, fontWeight: '500' },
+  sendBtnDisabled: { backgroundColor: DarkColors.surface },
+  pendingNote: { flexDirection: 'row', alignItems: 'center', gap: Spacing.px8, paddingVertical: Spacing.px12, justifyContent: 'center' },
+  pendingText: { fontSize: FontSize.label, color: DarkColors.unpair, fontWeight: '500', fontFamily: FontFamily.googleSans },
   closedNote: {
     flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.px8,
     paddingVertical: Spacing.px12, paddingHorizontal: Spacing.px8,
-    backgroundColor: Colors.dangerLight + '55', borderRadius: Radius.md,
+    backgroundColor: 'rgba(239,83,80,0.12)', borderRadius: Radius.md,
   },
   harnessOffNote: {
     flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.px8,
     paddingVertical: Spacing.px12, paddingHorizontal: Spacing.px8,
-    backgroundColor: Colors.warning + '1A', borderRadius: Radius.md,
+    backgroundColor: 'rgba(217,164,65,0.12)', borderRadius: Radius.md,
   },
   closedTextWrap: { flex: 1, gap: 2 },
-  closedTitle: { fontSize: FontSize.label, color: Colors.danger, fontWeight: '700' },
-  closedSub: { fontSize: FontSize.metadata, color: Colors.textSecondary, lineHeight: 16 },
+  closedTitle: { fontSize: FontSize.label, color: DarkColors.danger, fontWeight: '700', fontFamily: FontFamily.googleSans },
+  closedSub: { fontSize: FontSize.metadata, color: DarkColors.textSecondary, lineHeight: 16, fontFamily: FontFamily.googleSans },
 })

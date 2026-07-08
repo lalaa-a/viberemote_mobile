@@ -2,6 +2,7 @@ import React, { useEffect } from 'react'
 import {
   NavigationContainer,
   createNavigationContainerRef,
+  getFocusedRouteNameFromRoute,
 } from '@react-navigation/native'
 import { createNativeStackNavigator } from '@react-navigation/native-stack'
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs'
@@ -10,7 +11,10 @@ import {
   View, Text, TouchableOpacity, StyleSheet, Platform,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import Ionicons from 'react-native-vector-icons/Ionicons'
+import type { SvgProps } from 'react-native-svg'
+import ChatsIcon from '../assets/icons/chats.svg'
+import MachinesIcon from '../assets/icons/machines.svg'
+import SettingsIcon from '../assets/icons/settings.svg'
 import { useAuth } from '../hooks/useAuth'
 import { useAppStore } from '../store/useAppStore'
 import { getDeviceId } from '../api/device'
@@ -27,7 +31,7 @@ import { MachinesScreen } from '../screens/Machines/MachinesScreen'
 import { ProfileScreen } from '../screens/Profile/ProfileScreen'
 import { useSessions } from '../hooks/useSessions'
 import { usePushNotifications } from '../hooks/usePushNotifications'
-import { Colors, Radius, Shadow, FontFamily, FontSize } from '../constants/colors'
+import { Colors, DarkColors, Radius, Shadow, FontFamily, FontSize } from '../constants/colors'
 import type {
   RootStackParamList,
   AuthStackParamList,
@@ -49,30 +53,31 @@ const HEADER_OPTS = {
   headerBackTitle:  'Back',
 }
 
+// Full-screen chat-detail routes hide the floating tab bar (Telegram-style).
+const HIDE_TAB_BAR_ROUTES = ['Chat', 'RequestDetail', 'FileBrowser']
+
 // ── Tab metadata ──────────────────────────────────────────────────────────────
-const TAB_META: Record<string, { label: string; iconActive: string; iconInactive: string }> = {
-  ChatsTab:    { label: 'Chats',    iconActive: 'chatbubbles',   iconInactive: 'chatbubbles-outline'   },
-  MachinesTab: { label: 'Machines', iconActive: 'server',        iconInactive: 'server-outline'        },
-  ProfileTab:  { label: 'Profile',  iconActive: 'person',        iconInactive: 'person-outline'        },
+// Custom SVG icons (stroke="currentColor" → tinted via the `color` prop).
+const TAB_ICON: Record<string, React.FC<SvgProps>> = {
+  ChatsTab:    ChatsIcon,
+  MachinesTab: MachinesIcon,
+  ProfileTab:  SettingsIcon,
 }
 
 // ── Tab button ────────────────────────────────────────────────────────────────
 function TabButton({ routeName, isFocused, badge, onPress }: {
   routeName: string; isFocused: boolean; badge: number; onPress: () => void
 }) {
-  const meta = TAB_META[routeName] ?? { label: routeName, iconActive: 'ellipse', iconInactive: 'ellipse-outline' }
+  const Icon  = TAB_ICON[routeName]
+  const color = isFocused ? DarkColors.tabActive : DarkColors.tabInactive
 
   return (
     <TouchableOpacity style={styles.tabBtn} onPress={onPress} activeOpacity={0.75}>
       <View style={[styles.tabChip, isFocused && styles.tabChipActive]}>
-        <Ionicons
-          name={isFocused ? meta.iconActive : meta.iconInactive}
-          size={26}
-          color={isFocused ? Colors.tabActive : Colors.tabInactive}
-        />
+        {Icon ? <Icon width={26} height={26} color={color} /> : null}
       </View>
       {badge > 0 && (
-        <View style={[styles.badge, { backgroundColor: Colors.danger }]}>
+        <View style={[styles.badge, { backgroundColor: DarkColors.badgeBg }]}>
           <Text style={styles.badgeText}>{badge > 99 ? '99+' : badge}</Text>
         </View>
       )}
@@ -117,7 +122,7 @@ function ChatsNavigator() {
       <SessionsStack.Screen name="ChatsList" component={SessionsScreen} options={{ headerShown: false }} />
       <SessionsStack.Screen name="Chat" component={ChatScreen} options={{ headerShown: false }} />
       <SessionsStack.Screen name="RequestDetail" component={RequestDetailScreen} options={{ headerShown: false }} />
-      <SessionsStack.Screen name="FileBrowser" component={FileBrowserScreen} options={({ route }) => ({ title: route.params.machineLabel })} />
+      <SessionsStack.Screen name="FileBrowser" component={FileBrowserScreen} options={{ headerShown: false }} />
     </SessionsStack.Navigator>
   )
 }
@@ -132,9 +137,12 @@ function AppNavigator() {
   return (
     <Tab.Navigator
       screenOptions={{ headerShown: false }}
-      tabBar={(props) => (
-        <FloatingTabBar {...props} badges={{ ChatsTab: activeChats }} />
-      )}
+      tabBar={(props) => {
+        const tabRoute = props.state.routes[props.state.index]
+        const nested   = getFocusedRouteNameFromRoute(tabRoute) ?? ''
+        if (HIDE_TAB_BAR_ROUTES.includes(nested)) return null
+        return <FloatingTabBar {...props} badges={{ ChatsTab: activeChats }} />
+      }}
     >
       <Tab.Screen name="ChatsTab"    component={ChatsNavigator} />
       <Tab.Screen name="MachinesTab" component={MachinesScreen} />
@@ -215,20 +223,21 @@ export function RootNavigator() {
 
 // ── Styles ─────────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  tabBarWrap: { position: 'absolute', left: 20, right: 20 },
+  // Centered, content-hugging pill (not full-width)
+  tabBarWrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center' },
   pill: {
-    flexDirection: 'row', height: 76, borderRadius: Radius.full,
-    backgroundColor: Colors.surfaceGlassStrong, borderWidth: 2.5,
-    borderColor: Colors.borderHairline, borderTopColor: Colors.borderGlass,
-    alignItems: 'center', paddingHorizontal: 8, ...Shadow.float,
+    flexDirection: 'row', height: 64, borderRadius: Radius.full,
+    backgroundColor: DarkColors.surface,
+    alignItems: 'center', paddingHorizontal: 12, gap: 20, ...Shadow.float,
   },
-  tabBtn:       { flex: 1, alignItems: 'center', justifyContent: 'center', height: '100%' },
-  tabChip:      { width: 52, height: 52, borderRadius: 25, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
-  tabChipActive:{ backgroundColor: Colors.accentLight },
+  tabBtn:       { alignItems: 'center', justifyContent: 'center', height: '100%' },
+  // Active highlight is a pill (matches the nav bar's full radius)
+  tabChip:      { width: 58, height: 44, borderRadius: Radius.full, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
+  tabChipActive:{ backgroundColor: DarkColors.surfaceRaised },
   badge: {
-    position: 'absolute', top: 8, right: '10%', minWidth: 16, height: 16,
+    position: 'absolute', top: 6, right: 6, minWidth: 16, height: 16,
     borderRadius: Radius.full, alignItems: 'center', justifyContent: 'center',
-    paddingHorizontal: 3, borderWidth: 2, borderColor: Colors.cream,
+    paddingHorizontal: 3, borderWidth: 2, borderColor: DarkColors.surface,
   },
   badgeText: { fontSize: 9, color: Colors.white, fontWeight: '700' },
 })

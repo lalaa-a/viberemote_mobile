@@ -3,7 +3,8 @@ import {
   View, Text, TouchableOpacity, TextInput, StyleSheet, ScrollView,
 } from 'react-native'
 import { formatDistanceToNow } from 'date-fns'
-import { Colors, Spacing, Radius, FontSize, FontFamily } from '../constants/colors'
+import { DarkColors, Spacing, Radius, FontSize, FontFamily } from '../constants/colors'
+import { Button } from './ui/Button'
 import type { PendingRequest, SelectedAnswer } from '../types'
 
 interface Props {
@@ -160,7 +161,7 @@ export function QuestionCard({ request, onSubmit }: Props) {
             <TextInput
               style={styles.other}
               placeholder="Other… (type a custom answer)"
-              placeholderTextColor={Colors.textTertiary}
+              placeholderTextColor={DarkColors.textTertiary}
               value={custom[qi] ?? ''}
               onChangeText={t => setCustom(p => ({ ...p, [qi]: t }))}
               multiline
@@ -169,89 +170,77 @@ export function QuestionCard({ request, onSubmit }: Props) {
         )
       })}
 
-      <TouchableOpacity
-        style={[styles.submit, !canSubmit && styles.submitDisabled]}
-        onPress={submit}
-        disabled={!canSubmit}
-        activeOpacity={0.85}
-      >
-        <Text style={styles.submitText}>
-          {canSubmit || !multiQuestion
-            ? 'Submit answer'
-            : `Answer all ${questions.length} questions`}
-        </Text>
-      </TouchableOpacity>
+      <Button variant="success" disabled={!canSubmit} onPress={submit}>
+        {canSubmit || !multiQuestion ? 'Submit answer' : `Answer all ${questions.length} questions`}
+      </Button>
     </View>
   )
 }
 
+const HL_BG = 'rgba(39,224,126,0.12)'  // selected wash (online green)
+
 const styles = StyleSheet.create({
   card: {
-    marginHorizontal: Spacing.px20,
-    marginVertical:   6,
-    padding:          Spacing.px20,
-    borderRadius:     Radius.md,
+    padding:          Spacing.px16,
+    borderRadius:     Radius.lg,
     borderWidth:      1,
-    borderColor:      Colors.borderHairline,
-    backgroundColor:  Colors.bgPrimary,
+    borderColor:      DarkColors.border,
+    backgroundColor:  DarkColors.surface,
     gap:              Spacing.px12,
   },
   headerRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.px8 },
   icon:      { fontSize: FontSize.body },
   kindLabel: {
     fontSize: FontSize.label, fontStyle: 'italic',
-    color: Colors.textSecondary, fontWeight: '500', flex: 1,
+    color: DarkColors.textSecondary, fontWeight: '500', flex: 1, fontFamily: FontFamily.googleSans,
   },
-  time: { fontSize: FontSize.metadata, color: Colors.textTertiary },
+  time: { fontSize: FontSize.metadata, color: DarkColors.textTertiary },
 
   // tab strip
   tabs: { gap: Spacing.px8, paddingVertical: Spacing.px4 },
   tab: {
     paddingHorizontal: Spacing.px12, paddingVertical: Spacing.px8,
-    borderRadius: Radius.sm, borderWidth: 1, borderColor: Colors.borderHairline,
+    borderRadius: Radius.sm, borderWidth: 1, borderColor: DarkColors.border,
+    backgroundColor: DarkColors.surfaceRaised,
   },
-  tabOn:     { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
-  tabText:   { fontSize: FontSize.metadata, color: Colors.textSecondary, fontWeight: '500', maxWidth: 120 },
-  tabTextOn: { color: Colors.primaryDark, fontWeight: '700' },
+  tabOn:     { borderColor: DarkColors.online, backgroundColor: HL_BG },
+  tabText:   { fontSize: FontSize.metadata, color: DarkColors.textSecondary, fontWeight: '500', maxWidth: 120, fontFamily: FontFamily.googleSans },
+  tabTextOn: { color: DarkColors.textPrimary, fontWeight: '700' },
 
   block:   { gap: Spacing.px8 },
-  counter: { fontSize: FontSize.microLabel, fontWeight: '600', color: Colors.primaryDark, letterSpacing: 0.4 },
+  counter: { fontSize: FontSize.microLabel, fontWeight: '600', color: DarkColors.online, letterSpacing: 0.4 },
   header: {
     fontSize: FontSize.microLabel, fontWeight: '600', letterSpacing: 0.6,
-    textTransform: 'uppercase', color: Colors.textTertiary,
+    textTransform: 'uppercase', color: DarkColors.textTertiary,
   },
-  question: { fontSize: FontSize.cardTitle, fontWeight: '500', color: Colors.textPrimary },
-  hint:     { fontSize: FontSize.metadata, color: Colors.textTertiary },
+  question: { fontSize: FontSize.cardTitle, fontWeight: '500', color: DarkColors.textPrimary, fontFamily: FontFamily.googleSans },
+  hint:     { fontSize: FontSize.metadata, color: DarkColors.textTertiary },
 
   option: {
     padding: Spacing.px12, borderRadius: Radius.sm,
-    borderWidth: 1, borderColor: Colors.borderHairline, gap: Spacing.px8,
+    borderWidth: 1, borderColor: DarkColors.border, gap: Spacing.px8,
+    backgroundColor: DarkColors.surfaceRaised,
   },
-  optionOn:     { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
+  optionOn:     { borderColor: DarkColors.online, backgroundColor: HL_BG },
   optHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.px12 },
-  mark:   { fontSize: 18, color: Colors.textTertiary },
-  markOn: { color: Colors.primaryDark },
+  mark:   { fontSize: 18, color: DarkColors.textTertiary },
+  markOn: { color: DarkColors.online },
   optBody:  { flex: 1 },
-  optLabel: { fontSize: FontSize.body, fontWeight: '500', color: Colors.textPrimary },
-  optDesc:  { fontSize: FontSize.metadata, color: Colors.textTertiary, marginTop: 2 },
+  optLabel: { fontSize: FontSize.body, fontWeight: '500', color: DarkColors.textPrimary, fontFamily: FontFamily.googleSans },
+  optDesc:  { fontSize: FontSize.metadata, color: DarkColors.textTertiary, marginTop: 2 },
 
   // preview
-  previewWrap:  { borderRadius: Radius.sm, backgroundColor: Colors.bgSecondary, marginTop: Spacing.px4 },
+  previewWrap:  { borderRadius: Radius.sm, backgroundColor: DarkColors.bg, marginTop: Spacing.px4 },
   previewInner: { padding: Spacing.px8 },
-  previewText:  { fontFamily: FontFamily.mono, fontSize: FontSize.metadata, color: Colors.textSecondary },
+  previewText:  { fontFamily: FontFamily.mono, fontSize: FontSize.metadata, color: DarkColors.textSecondary },
 
   other: {
-    borderWidth: 1, borderColor: Colors.borderHairline, borderRadius: Radius.sm,
+    borderWidth: 1, borderColor: DarkColors.borderMid, borderRadius: Radius.sm,
     paddingHorizontal: Spacing.px12, paddingVertical: Spacing.px8,
-    fontSize: FontSize.body, fontFamily: FontFamily.mono, color: Colors.textPrimary,
+    fontSize: FontSize.body, fontFamily: FontFamily.mono, color: DarkColors.textPrimary,
+    backgroundColor: DarkColors.surfaceRaised,
   },
-  submit: {
-    backgroundColor: Colors.primary, borderRadius: Radius.sm,
-    padding: Spacing.px12, alignItems: 'center',
-  },
-  submitDisabled: { opacity: 0.4 },
-  submitText: { color: Colors.white, fontWeight: '600', fontSize: FontSize.label },
   answeredText: {
-    fontSize: FontSize.body, color: Colors.successDark, fontWeight: '600', marginTop: Spacing.px4,
+    fontSize: FontSize.body, color: DarkColors.online, fontWeight: '600', marginTop: Spacing.px4,
   },
 })

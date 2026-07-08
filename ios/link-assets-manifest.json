@@ -1,0 +1,13 @@
+{
+  "migIndex": 1,
+  "data": [
+    {
+      "path": "assets/fonts/BitcountGridSingle-Regular.ttf",
+      "sha1": "d136f6de609d41ee0446cf8e4c5ee11bb49bbc24"
+    },
+    {
+      "path": "assets/fonts/GoogleSansFlex-Regular.ttf",
+      "sha1": "597858131d8533392f5f2ca1a4096a466bdeae26"
+    }
+  ]
+}

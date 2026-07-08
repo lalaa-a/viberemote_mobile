@@ -1,6 +1,6 @@
 import React from 'react'
 import {
-  View, Text, ScrollView, TouchableOpacity, StyleSheet,
+  View, Text, ScrollView, StyleSheet,
   Alert, ActivityIndicator, StatusBar, Platform,
 } from 'react-native'
 import { useRoute, useNavigation } from '@react-navigation/native'
@@ -9,10 +9,13 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
 import { formatDistanceToNow } from 'date-fns'
 import { useRequest, useDecideRequest, useAnswerRequest } from '../../hooks/useRequests'
 import { DiffViewer } from '../../components/DiffViewer/DiffViewer'
-import { RiskBadge } from '../../components/RiskBadge'
 import { QuestionCard } from '../../components/QuestionCard'
 import { GradientBackground } from '../../components/GradientBackground'
-import { Colors, Spacing, Radius, FontSize, Shadow } from '../../constants/colors'
+import { BackButton } from '../../components/ui/BackButton'
+import { Button } from '../../components/ui/Button'
+import { Badge, RISK_VARIANT } from '../../components/ui/Badge'
+import { Card, CardStrip } from '../../components/ui/Card'
+import { DarkColors, Spacing, Radius, FontSize, FontFamily } from '../../constants/colors'
 import { useAppStore } from '../../store/useAppStore'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import Ionicons from 'react-native-vector-icons/Ionicons'
@@ -22,6 +25,11 @@ type Route = RouteProp<SessionsStackParamList, 'RequestDetail'>
 type Nav   = NativeStackNavigationProp<SessionsStackParamList>
 
 const MONO = Platform.OS === 'ios' ? 'Menlo' : 'monospace'
+
+function lastPathPart(p?: string | null): string {
+  if (!p) return ''
+  return p.split(/[\\/]/).filter(Boolean).pop() ?? p
+}
 
 export function RequestDetailScreen() {
   const route      = useRoute<Route>()
@@ -75,34 +83,35 @@ export function RequestDetailScreen() {
 
   if (isLoading || !request) {
     return (
-      <GradientBackground>
+      <GradientBackground style={styles.root}>
         <View style={styles.center}>
-          <ActivityIndicator size="large" color={Colors.accent} />
+          <ActivityIndicator size="large" color={DarkColors.online} />
         </View>
       </GradientBackground>
     )
   }
 
-  // ── Question requests render the QuestionCard (option picker) instead of the
-  //    approve/deny approval layout. QuestionCard handles its own answered state.
+  const dirLabel = lastPathPart(request.file_path ?? request.files_affected?.[0]) || (request.machines?.label ?? 'request')
+
+  // ── Top navigation: back button + directory pill (no page title) ──
+  const Header = (
+    <View style={[styles.backRow, { paddingTop: insets.top + 12 }]}>
+      <BackButton />
+      <View style={styles.dirPill}>
+        <Text style={styles.dirText} numberOfLines={1}>{dirLabel}</Text>
+      </View>
+    </View>
+  )
+
+  // ── Question requests keep the QuestionCard picker ──
   if (request.kind === 'question') {
     return (
-      <GradientBackground>
-        <StatusBar barStyle="dark-content" translucent backgroundColor="transparent" />
-        <View style={[styles.backRow, { paddingTop: insets.top + 4 }]}>
-          <TouchableOpacity
-            onPress={() => navigation.goBack()}
-            style={styles.backBtn}
-            activeOpacity={0.7}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <Ionicons name="chevron-back" size={20} color={Colors.textSecondary} />
-            <Text style={styles.backLabel}>Back</Text>
-          </TouchableOpacity>
-        </View>
+      <GradientBackground style={styles.root}>
+        <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+        {Header}
         <ScrollView
           style={styles.scroll}
-          contentContainerStyle={[styles.content, { paddingHorizontal: 0 }]}
+          contentContainerStyle={styles.content}
           showsVerticalScrollIndicator={false}
         >
           <QuestionCard request={request} onSubmit={handleAnswer} />
@@ -113,24 +122,11 @@ export function RequestDetailScreen() {
 
   const alreadyDecided = request.status !== 'pending'
   const timeAgo = formatDistanceToNow(new Date(request.created_at), { addSuffix: true })
-  const riskCfg = Colors.risk[request.risk_level] ?? Colors.risk.low
 
   return (
-    <GradientBackground>
-      <StatusBar barStyle="dark-content" translucent backgroundColor="transparent" />
-
-      {/* Custom back button row */}
-      <View style={[styles.backRow, { paddingTop: insets.top + 4 }]}>
-        <TouchableOpacity
-          onPress={() => navigation.goBack()}
-          style={styles.backBtn}
-          activeOpacity={0.7}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <Ionicons name="chevron-back" size={20} color={Colors.textSecondary} />
-          <Text style={styles.backLabel}>Back</Text>
-        </TouchableOpacity>
-      </View>
+    <GradientBackground style={styles.root}>
+      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+      {Header}
 
       <ScrollView
         style={styles.scroll}
@@ -138,43 +134,37 @@ export function RequestDetailScreen() {
         showsVerticalScrollIndicator={false}
       >
         {/* ── Header card ── */}
-        <View style={styles.headerCard}>
-          {/* Risk whisper */}
-          <View style={[styles.whisper, { backgroundColor: riskCfg.whisper }]} />
+        <Card>
+          <CardStrip>
+            <Text style={styles.toolName} numberOfLines={1}>{request.tool_name}</Text>
+            <Badge variant={RISK_VARIANT[request.risk_level] ?? 'neutral'}>
+              {request.risk_level}
+            </Badge>
+          </CardStrip>
 
-          <View style={styles.headerTop}>
-            <Text style={styles.toolName}>{request.tool_name}</Text>
-            <RiskBadge level={request.risk_level} />
-          </View>
           <Text style={styles.summary}>{request.summary}</Text>
 
-          <View style={styles.divider} />
-
-          <View style={styles.infoRow}>
-            <View style={styles.infoItem}>
-              <Text style={styles.infoLabel}>MACHINE</Text>
-              <View style={styles.machineRow}>
-                <View style={[
-                  styles.onlineDot,
-                  { backgroundColor: request.machines?.is_online ? Colors.success : Colors.textTertiary },
-                ]} />
-                <Text style={styles.infoValue}>{request.machines?.label ?? 'Unknown'}</Text>
-              </View>
+          {/* Icon row — machine · risk · time */}
+          <View style={styles.iconRow}>
+            <View style={styles.iconItem}>
+              <Ionicons name="desktop-outline" size={22} color={DarkColors.textPrimary} />
+              <View style={[styles.iconDot, { backgroundColor: request.machines?.is_online ? DarkColors.online : DarkColors.textTertiary }]} />
+              <Text style={styles.iconLabel} numberOfLines={1}>{request.machines?.label ?? 'Unknown'}</Text>
             </View>
-            <View style={styles.infoItem}>
-              <Text style={styles.infoLabel}>RISK</Text>
-              <Text style={styles.infoValue} numberOfLines={2}>{request.risk_reason ?? '—'}</Text>
+            <View style={styles.iconItem}>
+              <Ionicons name="shield-outline" size={22} color={DarkColors.textPrimary} />
+              <Text style={styles.iconLabel} numberOfLines={1}>{request.risk_level}</Text>
             </View>
-            <View style={styles.infoItem}>
-              <Text style={styles.infoLabel}>TIME</Text>
-              <Text style={styles.infoValue}>{timeAgo}</Text>
+            <View style={styles.iconItem}>
+              <Ionicons name="time-outline" size={22} color={DarkColors.textPrimary} />
+              <Text style={styles.iconLabel} numberOfLines={1}>{timeAgo}</Text>
             </View>
           </View>
-        </View>
+        </Card>
 
         {/* ── Bash command ── */}
         {request.command && (
-          <View style={styles.section}>
+          <Card>
             <Text style={styles.sectionLabel}>BASH COMMAND</Text>
             <View style={styles.codeBlock}>
               <Text style={styles.dollarSign}>$</Text>
@@ -182,87 +172,63 @@ export function RequestDetailScreen() {
                 <Text style={styles.commandText} selectable>{request.command}</Text>
               </ScrollView>
             </View>
-          </View>
+          </Card>
         )}
 
         {/* ── Files ── */}
         {request.files_affected?.length > 0 && (
-          <View style={styles.section}>
+          <Card>
             <Text style={styles.sectionLabel}>FILES · {request.files_affected.length}</Text>
-            <View style={styles.filesCard}>
-              {request.files_affected.map((f, i) => (
-                <View key={i} style={[
-                  styles.fileRow,
-                  i < request.files_affected.length - 1 && styles.fileRowBorder,
-                ]}>
-                  <Ionicons name="document-outline" size={14} color={Colors.textTertiary} />
-                  <Text style={styles.filePath} selectable numberOfLines={1}>{f}</Text>
-                </View>
-              ))}
-            </View>
-          </View>
+            {request.files_affected.map((f, i) => (
+              <View key={i} style={styles.fileRow}>
+                <Ionicons name="document-outline" size={14} color={DarkColors.textTertiary} />
+                <Text style={styles.filePath} selectable numberOfLines={1}>{f}</Text>
+              </View>
+            ))}
+          </Card>
         )}
 
         {/* ── Diff ── */}
         {request.diff && (
-          <View style={styles.section}>
+          <Card>
             <Text style={styles.sectionLabel}>
               CHANGES · +{request.diff.grand_stats?.added ?? request.diff.stats?.added ?? 0}
               {'  '}−{request.diff.grand_stats?.removed ?? request.diff.stats?.removed ?? 0}
             </Text>
             <DiffViewer diff={request.diff} />
-          </View>
+          </Card>
         )}
 
         {/* ── Decision banner ── */}
         {alreadyDecided && (
-          <View style={[
-            styles.decidedBanner,
-            {
-              backgroundColor: request.status === 'approved' ? Colors.risk.low.bg : Colors.risk.critical.bg,
-              borderColor:     request.status === 'approved' ? Colors.risk.low.border : Colors.risk.critical.border,
-            },
-          ]}>
+          <Card style={styles.decidedBanner}>
             <Ionicons
               name={request.status === 'approved' ? 'checkmark-circle' : 'close-circle'}
-              size={16}
-              color={request.status === 'approved' ? Colors.risk.low.text : Colors.risk.critical.text}
+              size={18}
+              color={request.status === 'approved' ? DarkColors.online : DarkColors.danger}
             />
             <Text style={[
               styles.decidedText,
-              { color: request.status === 'approved' ? Colors.risk.low.text : Colors.risk.critical.text },
+              { color: request.status === 'approved' ? DarkColors.online : DarkColors.danger },
             ]}>
               {request.status === 'approved' ? 'Approved' : 'Denied'}
               {request.decided_by ? ` via ${request.decided_by}` : ''}
             </Text>
-          </View>
+          </Card>
         )}
 
-        <View style={{ height: 130 }} />
+        <View style={{ height: 150 }} />
       </ScrollView>
 
       {/* ── Sticky footer ── */}
       {!alreadyDecided && (
-        <View style={[styles.footer, { paddingBottom: insets.bottom + 92 }]}>
-          <TouchableOpacity
-            style={styles.denyBtn}
-            onPress={() => handleDecide('denied')}
-            disabled={decide.isPending}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.denyText}>Deny</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.approveBtn}
-            onPress={() => handleDecide('approved')}
-            disabled={decide.isPending}
-            activeOpacity={0.8}
-          >
-            {decide.isPending
-              ? <ActivityIndicator color={Colors.textInverse} />
-              : <Text style={styles.approveText}>Approve</Text>
-            }
-          </TouchableOpacity>
+        <View style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}>
+          <Button variant="destructive" style={styles.footerBtn} onPress={() => handleDecide('denied')} disabled={decide.isPending}>
+            Deny
+          </Button>
+          <Button variant="success" style={styles.footerBtn} loading={decide.isPending} onPress={() => handleDecide('approved')}>
+            Approve
+          </Button>
         </View>
       )}
     </GradientBackground>
@@ -270,217 +236,61 @@ export function RequestDetailScreen() {
 }
 
 const styles = StyleSheet.create({
-
+  root:   { backgroundColor: DarkColors.bg },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
-  // Back row
+  // Back row: circular button + directory pill
   backRow: {
-    paddingHorizontal: Spacing.px12,
-    paddingBottom:     Spacing.px4,
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.px10,
+    paddingHorizontal: Spacing.px20, paddingBottom: Spacing.px8,
   },
-  backBtn: {
-    flexDirection: 'row',
-    alignItems:    'center',
-    gap:           5,
-    alignSelf:     'flex-start',
-    paddingHorizontal: Spacing.px8,
-    paddingVertical:   Spacing.px8,
+  dirPill: {
+    flex: 1, height: 48, justifyContent: 'center',
+    paddingHorizontal: Spacing.px16, borderRadius: Radius.full,
+    backgroundColor: DarkColors.surfaceRaised,
   },
-  backLabel: {
-    fontSize:   FontSize.cardTitle,
-    color:      Colors.textSecondary,
-    fontWeight: '500',
-  },
+  dirText: { fontSize: FontSize.body, color: DarkColors.textPrimary, fontFamily: FontFamily.googleSans, fontWeight: '500' },
 
   scroll: { flex: 1 },
-  content: {
-    padding:       Spacing.px20,
-    paddingTop:    Spacing.px8,
-    paddingBottom: Spacing.px32,
-    gap:           Spacing.px16,
-  },
+  content: { paddingHorizontal: Spacing.px20, paddingTop: Spacing.px4, gap: Spacing.px16 },
 
-  // Header card
-  headerCard: {
-    backgroundColor: Colors.bgPrimary,
-    borderRadius:    Radius.md,
-    padding:         Spacing.px20,
-    gap:             Spacing.px12,
-    borderWidth:     1,
-    borderColor:     Colors.borderHairline,
-    borderTopColor:  Colors.borderGlass,
-    overflow:        'hidden',
-    ...Shadow.glassLow,
-  },
-  whisper: {
-    position: 'absolute',
-    top:      0,
-    left:     0,
-    right:    0,
-    height:   56,
-  },
-  headerTop: {
-    flexDirection:  'row',
-    alignItems:     'center',
-    justifyContent: 'space-between',
-  },
-  toolName: {
-    fontSize:      FontSize.displayM,
-    fontWeight:    '500',
-    fontFamily:    'Fraunces-SemiBold',
-    color:         Colors.textPrimary,
-    letterSpacing: -0.4,
-  },
-  summary: {
-    fontSize:   FontSize.body,
-    color:      Colors.textSecondary,
-    lineHeight: 22,
-  },
-  divider: {
-    height:          1,
-    backgroundColor: Colors.borderHairline,
-  },
-  infoRow: {
-    flexDirection: 'row',
-    gap:           Spacing.px16,
-  },
-  infoItem: { flex: 1, gap: 4 },
-  infoLabel: {
-    fontSize:      FontSize.microLabel,
-    color:         Colors.textTertiary,
-    fontWeight:    '600',
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
-  },
-  machineRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  onlineDot: { width: 5, height: 5, borderRadius: Radius.full },
-  infoValue: {
-    fontSize:   FontSize.label,
-    color:      Colors.textPrimary,
-    fontWeight: '500',
-    flex:       1,
-  },
-  // Sections
-  section: { gap: Spacing.px8 },
+  toolName: { fontSize: FontSize.cardTitle, fontWeight: '700', color: DarkColors.textPrimary, fontFamily: FontFamily.googleSans, flex: 1 },
+  summary:  { fontSize: FontSize.body, color: DarkColors.textPrimary, fontFamily: FontFamily.googleSans, lineHeight: 22, paddingHorizontal: Spacing.px4 },
+
+  // Icon row
+  iconRow:  { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'flex-start', paddingVertical: Spacing.px8 },
+  iconItem: { alignItems: 'center', gap: 4, flex: 1 },
+  iconDot:  { width: 6, height: 6, borderRadius: Radius.full, position: 'absolute', top: 0, right: '32%' },
+  iconLabel:{ fontSize: FontSize.metadata, color: DarkColors.textSecondary, fontFamily: FontFamily.googleSans, maxWidth: 100, textAlign: 'center' },
+
   sectionLabel: {
-    fontSize:      FontSize.microLabel,
-    fontWeight:    '600',
-    color:         Colors.textTertiary,
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
+    fontSize: FontSize.microLabel, fontWeight: '700', color: DarkColors.textSecondary,
+    letterSpacing: 0.6, textTransform: 'uppercase', fontFamily: FontFamily.googleSans,
   },
 
   // Code block
   codeBlock: {
-    flexDirection:   'row',
-    backgroundColor: Colors.codeBg,
-    borderRadius:    Radius.md,
-    padding:         Spacing.px16,
-    gap:             Spacing.px8,
-    alignItems:      'flex-start',
+    flexDirection: 'row', backgroundColor: DarkColors.bg, borderRadius: Radius.md,
+    padding: Spacing.px16, gap: Spacing.px8, alignItems: 'flex-start',
   },
-  dollarSign: {
-    fontFamily: MONO,
-    fontSize:   FontSize.monoSmall,
-    color:      Colors.accent,
-    lineHeight: 20,
-    marginTop:  1,
-  },
-  commandText: {
-    fontFamily: MONO,
-    fontSize:   FontSize.monoSmall,
-    color:      Colors.codeText,
-    lineHeight: 20,
-  },
+  dollarSign:  { fontFamily: MONO, fontSize: FontSize.monoSmall, color: DarkColors.online, lineHeight: 20, marginTop: 1 },
+  commandText: { fontFamily: MONO, fontSize: FontSize.monoSmall, color: DarkColors.textPrimary, lineHeight: 20 },
 
-  // Files card
-  filesCard: {
-    backgroundColor: Colors.bgPrimary,
-    borderRadius:    Radius.sm,
-    borderWidth:     1,
-    borderColor:     Colors.borderHairline,
-    borderTopColor:  Colors.borderGlass,
-    overflow:        'hidden',
-  },
-  fileRow: {
-    flexDirection: 'row',
-    alignItems:    'center',
-    gap:           Spacing.px8,
-    padding:       Spacing.px12,
-  },
-  fileRowBorder: {
-    borderBottomWidth: 1,
-    borderColor:       Colors.borderHairline,
-  },
-  filePath: {
-    fontFamily: MONO,
-    fontSize:   FontSize.monoSmall,
-    color:      Colors.textPrimary,
-    flex:       1,
-  },
+  // Files
+  fileRow:  { flexDirection: 'row', alignItems: 'center', gap: Spacing.px8, paddingVertical: 2 },
+  filePath: { fontFamily: MONO, fontSize: FontSize.monoSmall, color: DarkColors.textSecondary, flex: 1 },
 
   // Decision banner
-  decidedBanner: {
-    flexDirection:  'row',
-    alignItems:     'center',
-    justifyContent: 'center',
-    gap:            Spacing.px8,
-    borderRadius:   Radius.md,
-    padding:        Spacing.px16,
-    borderWidth:    1,
-  },
-  decidedText: {
-    fontSize:   FontSize.label,
-    fontWeight: '600',
-    fontStyle:  'italic',
-  },
+  decidedBanner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.px8 },
+  decidedText:   { fontSize: FontSize.label, fontWeight: '700', fontFamily: FontFamily.googleSans },
 
   // Sticky footer
   footer: {
-    position:        'absolute',
-    bottom:          0,
-    left:            0,
-    right:           0,
-    flexDirection:   'row',
-    gap:             Spacing.px12,
-    paddingHorizontal: Spacing.px20,
-    paddingTop:      Spacing.px16,
-    backgroundColor: Colors.surfaceGlassStrong,
-    borderTopWidth:  1,
-    borderColor:     Colors.borderHairline,
-    borderTopColor:  Colors.borderGlass,
-    alignItems:      'flex-end',
-    ...Shadow.modal,
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    flexDirection: 'row', gap: Spacing.px12,
+    paddingHorizontal: Spacing.px20, paddingTop: Spacing.px16,
+    backgroundColor: DarkColors.surface,
+    borderTopLeftRadius: Radius.xl, borderTopRightRadius: Radius.xl,
   },
-
-  denyBtn: {
-    flex:           1,
-    height:         48,
-    borderRadius:   Radius.full,
-    borderWidth:    1.5,
-    borderColor:    Colors.danger + '80',
-    alignItems:     'center',
-    justifyContent: 'center',
-    marginBottom: Spacing.px12,
-  },
-  denyText: {
-    fontSize:   FontSize.label,
-    fontWeight: '600',
-    color:      Colors.danger,
-  },
-  approveBtn: {
-    flex:            1,
-    height:          56,
-    borderRadius:    Radius.full,
-    backgroundColor: Colors.accentDeep,
-    alignItems:      'center',
-    justifyContent:  'center',
-    marginBottom: Spacing.px12,
-    ...Shadow.inkPill,
-  },
-  approveText: {
-    fontSize:   FontSize.body,
-    fontWeight: '600',
-    color:      Colors.textInverse,
-  },
+  footerBtn: { flex: 1 },
 })

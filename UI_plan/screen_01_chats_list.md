@@ -238,7 +238,7 @@ State: `const [query, setQuery] = useState('')` in `SessionsScreen`.
 
 ### 2.3 Machine filter strip
 
-Keeps the existing `MachineChips` horizontal scroll, restyled for dark theme.
+Standalone horizontal-scrolling chips (no surrounding bar container) — user scrolls and taps to select. Restyled for dark theme.
 
 | Property | Current | New |
 |---|---|---|
@@ -377,17 +377,22 @@ The wireframe shows 3 icon-only tabs in a pill with no text labels. Icons change
 | MachinesTab | `server` | `grid` or `barcode` | grid-style icon |
 | ProfileTab | `person` | `settings` | gear icon |
 
-**Pill style**
+**Pill style** — compact, centered (hugs the 3 icons, not full-width)
 
 ```
+alignSelf: center (via tabBarWrap alignItems: center)
+height: 64
+paddingHorizontal: 12, gap: 6
 backgroundColor: DarkColors.surface   (#143753)
-borderWidth: 1
-borderColor: DarkColors.borderMid
+borderRadius: Radius.full
+no border — shadow only
 ```
 
-**Active chip** (the highlight behind the active tab icon):
+**Active chip** (the highlight behind the active tab icon) — a **rounded rectangle**, not a circle:
 ```
-backgroundColor: DarkColors.tabChipActive   (rgba(255,255,255,0.12))
+width: 58, height: 44
+borderRadius: Radius.md (16)
+backgroundColor: DarkColors.surfaceRaised   (#164269 — the "third" color)
 ```
 
 **Icon colors**
