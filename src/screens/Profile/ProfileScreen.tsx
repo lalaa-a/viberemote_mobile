@@ -1,179 +1,197 @@
 import React, { useState } from 'react'
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
-  StatusBar, Alert, ActivityIndicator, TextInput,
+  StatusBar, Alert, ActivityIndicator, TextInput, Linking, Platform,
 } from 'react-native'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useNavigation } from '@react-navigation/native'
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import Ionicons from 'react-native-vector-icons/Ionicons'
 import { useAuth } from '../../hooks/useAuth'
-import { fetchProfile, updateProfile, changePassword, deleteAccount } from '../../api/server'
+import { fetchProfile, updateProfile } from '../../api/server'
+import type { ProfileStackParamList } from '../../types'
 import { GradientBackground } from '../../components/GradientBackground'
-import { Colors, Spacing, Radius, FontSize, FontFamily, TAB_BOTTOM_INSET } from '../../constants/colors'
+import { DarkColors, Spacing, Radius, FontSize, FontFamily, TAB_BOTTOM_INSET } from '../../constants/colors'
+
+const APP_VERSION   = '1.0.0'
+const SUPPORT_EMAIL = 'support@vibe-remote.app' // TODO: replace with the real support address
+
+// ── Reusable setting row ──────────────────────────────────────────────────────
+// Icons match the bottom-nav style: a plain monochrome white stroke, no per-row accent
+// colour and no tinted chip behind them. `tint` is accepted but intentionally ignored so
+// existing call sites keep working. (`danger` still tints the label, not the icon.)
+function SettingRow({ icon, label, value, onPress, danger, last }: {
+  icon: string; tint?: string; label: string; value?: string
+  onPress?: () => void; danger?: boolean; last?: boolean
+}) {
+  return (
+    <TouchableOpacity
+      style={[styles.row, !last && styles.rowBorder]}
+      onPress={onPress}
+      activeOpacity={0.7}
+    >
+      <View style={styles.rowIcon}>
+        <Ionicons name={icon} size={24} color={DarkColors.tabActive} />
+      </View>
+      <Text style={[styles.rowLabel, danger && { color: DarkColors.danger }]}>{label}</Text>
+      {value ? <Text style={styles.rowValue}>{value}</Text> : null}
+      {onPress && !value && <Ionicons name="chevron-forward" size={18} color={DarkColors.textTertiary} />}
+    </TouchableOpacity>
+  )
+}
 
 export function ProfileScreen() {
-  const insets     = useSafeAreaInsets()
+  const insets      = useSafeAreaInsets()
   const { signOut } = useAuth()
   const queryClient = useQueryClient()
+  const navigation  = useNavigation<NativeStackNavigationProp<ProfileStackParamList>>()
 
-  const { data: profile, isLoading } = useQuery({
-    queryKey: ['profile'],
-    queryFn:  fetchProfile,
-  })
+  const { data: profile, isLoading } = useQuery({ queryKey: ['profile'], queryFn: fetchProfile })
 
-  const [editName, setEditName]   = useState<string | null>(null)
-  const [newPwd,   setNewPwd]     = useState('')
-  const [showPwd,  setShowPwd]    = useState(false)
+  const [editName, setEditName] = useState<string | null>(null)
 
   const updateMut = useMutation({
     mutationFn: (patch: { display_name?: string }) => updateProfile(patch),
-    onSuccess:  () => {
-      queryClient.invalidateQueries({ queryKey: ['profile'] })
-      setEditName(null)
-    },
-  })
-
-  const pwdMut = useMutation({
-    mutationFn: (pwd: string) => changePassword(pwd),
-    onSuccess:  () => {
-      setNewPwd('')
-      setShowPwd(false)
-      Alert.alert('Password changed', 'Your password has been updated.')
-    },
-    onError: (e: any) => Alert.alert('Error', e.message),
-  })
-
-  const deleteMut = useMutation({
-    mutationFn: deleteAccount,
-    onSuccess:  () => signOut(),
+    onSuccess:  () => { queryClient.invalidateQueries({ queryKey: ['profile'] }); setEditName(null) },
     onError:    (e: any) => Alert.alert('Error', e.message),
   })
 
-  function handleDeleteAccount() {
+  function handleSignOut() {
+    Alert.alert('Log out', 'Log out of Vibe Remote?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Log Out', style: 'destructive', onPress: signOut },
+    ])
+  }
+
+  function handleNotifications() {
     Alert.alert(
-      'Delete account',
-      'This permanently removes your account and all data. This cannot be undone.',
+      'Notifications',
+      'Manage push notification permissions for Vibe Remote in your device settings.',
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: () => deleteMut.mutate() },
+        { text: 'Open Settings', onPress: () => Linking.openSettings() },
       ]
     )
   }
 
-  function handleSignOut() {
-    Alert.alert('Sign out', 'Sign out of Vibe Remote?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Sign Out', onPress: signOut },
-    ])
+  function handleTheme() {
+    Alert.alert('Theme', 'Vibe Remote currently uses a Dark theme. More theme options are coming soon.')
   }
 
+  function handleAbout() {
+    Alert.alert(
+      'Vibe Remote',
+      `Version ${APP_VERSION}\n\nControl and approve your AI coding agents from anywhere — review tool calls, answer questions, and send prompts on the go.`
+    )
+  }
+
+  function handleBugReport() {
+    const subject = encodeURIComponent('Vibe Remote — Bug report')
+    const body = encodeURIComponent(
+      `\n\n---\nApp version: ${APP_VERSION}\nPlatform: ${Platform.OS} ${Platform.Version}\nAccount: ${profile?.email ?? 'unknown'}`
+    )
+    Linking.openURL(`mailto:${SUPPORT_EMAIL}?subject=${subject}&body=${body}`)
+      .catch(() => Alert.alert('No mail app', `Send your report to ${SUPPORT_EMAIL}`))
+  }
+
+  const displayName = profile?.display_name?.trim() || 'Set your name'
+  const initial     = (profile?.display_name?.trim() || profile?.email || '?').charAt(0).toUpperCase()
+
   return (
-    <GradientBackground>
-      <StatusBar barStyle="dark-content" translucent backgroundColor="transparent" />
+    <GradientBackground style={styles.root}>
+      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
 
       <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
-        <View>
-          <Text style={styles.appName}>Vibe Remote</Text>
-          <Text style={styles.title}>Profile</Text>
-        </View>
+        <Text style={styles.appName}>settings</Text>
       </View>
 
       {isLoading ? (
         <View style={styles.center}>
-          <ActivityIndicator size="large" color={Colors.accent} />
+          <ActivityIndicator size="large" color={DarkColors.online} />
         </View>
       ) : (
-        <ScrollView contentContainerStyle={[styles.list, { paddingBottom: TAB_BOTTOM_INSET }]}>
+        <ScrollView contentContainerStyle={[styles.list, { paddingBottom: TAB_BOTTOM_INSET }]} showsVerticalScrollIndicator={false}>
 
-          {/* ── Identity ── */}
-          <View style={styles.section}>
-            <Text style={styles.sectionLabel}>ACCOUNT</Text>
-            <View style={styles.card}>
-              <Text style={styles.fieldLabel}>Email</Text>
-              <Text style={styles.fieldValue}>{profile?.email ?? '—'}</Text>
+          {/* ── Profile card ── */}
+          <View style={styles.profileCard}>
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>{initial}</Text>
             </View>
-            <View style={styles.card}>
-              <Text style={styles.fieldLabel}>Display name</Text>
-              {editName !== null ? (
-                <View style={styles.editRow}>
-                  <TextInput
-                    style={styles.editInput}
-                    value={editName}
-                    onChangeText={setEditName}
-                    autoFocus
-                    placeholder="Your name"
-                    placeholderTextColor={Colors.textTertiary}
-                  />
-                  <TouchableOpacity
-                    onPress={() => updateMut.mutate({ display_name: editName })}
-                    disabled={updateMut.isPending}
-                    style={styles.saveBtn}
-                  >
-                    <Text style={styles.saveBtnText}>Save</Text>
-                  </TouchableOpacity>
+
+            {editName !== null ? (
+              <View style={styles.profileEdit}>
+                <TextInput
+                  style={styles.nameInput}
+                  value={editName}
+                  onChangeText={setEditName}
+                  autoFocus
+                  placeholder="Your name"
+                  placeholderTextColor={DarkColors.textTertiary}
+                />
+                <View style={styles.editBtns}>
                   <TouchableOpacity onPress={() => setEditName(null)} style={styles.cancelBtn}>
                     <Text style={styles.cancelBtnText}>Cancel</Text>
                   </TouchableOpacity>
-                </View>
-              ) : (
-                <View style={styles.editRow}>
-                  <Text style={styles.fieldValue}>{profile?.display_name ?? 'Not set'}</Text>
-                  <TouchableOpacity onPress={() => setEditName(profile?.display_name ?? '')}>
-                    <Ionicons name="pencil-outline" size={18} color={Colors.accent} />
-                  </TouchableOpacity>
-                </View>
-              )}
-            </View>
-          </View>
-
-          {/* ── Security ── */}
-          <View style={styles.section}>
-            <Text style={styles.sectionLabel}>SECURITY</Text>
-            <View style={styles.card}>
-              <Text style={styles.fieldLabel}>Change password</Text>
-              {showPwd ? (
-                <View style={styles.editRow}>
-                  <TextInput
-                    style={[styles.editInput, { flex: 1 }]}
-                    value={newPwd}
-                    onChangeText={setNewPwd}
-                    placeholder="New password (min 6 chars)"
-                    placeholderTextColor={Colors.textTertiary}
-                    secureTextEntry
-                    autoFocus
-                  />
                   <TouchableOpacity
-                    onPress={() => newPwd.length >= 6 && pwdMut.mutate(newPwd)}
-                    disabled={pwdMut.isPending || newPwd.length < 6}
-                    style={styles.saveBtn}
+                    onPress={() => updateMut.mutate({ display_name: editName.trim() })}
+                    disabled={updateMut.isPending || !editName.trim()}
+                    style={[styles.saveBtn, (!editName.trim() || updateMut.isPending) && { opacity: 0.5 }]}
                   >
-                    <Text style={styles.saveBtnText}>Save</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={() => { setShowPwd(false); setNewPwd('') }} style={styles.cancelBtn}>
-                    <Text style={styles.cancelBtnText}>Cancel</Text>
+                    {updateMut.isPending
+                      ? <ActivityIndicator size="small" color={DarkColors.bg} />
+                      : <Text style={styles.saveBtnText}>Save</Text>}
                   </TouchableOpacity>
                 </View>
-              ) : (
-                <TouchableOpacity onPress={() => setShowPwd(true)}>
-                  <Text style={styles.linkText}>Change password</Text>
+              </View>
+            ) : (
+              <>
+                <View style={styles.profileInfo}>
+                  <Text style={styles.profileName} numberOfLines={1}>{displayName}</Text>
+                  <Text style={styles.profileEmail} numberOfLines={1}>{profile?.email ?? '—'}</Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() => setEditName(profile?.display_name ?? '')}
+                  style={styles.editIcon}
+                  hitSlop={8}
+                >
+                  <Ionicons name="pencil" size={16} color={DarkColors.textPrimary} />
                 </TouchableOpacity>
-              )}
-            </View>
+              </>
+            )}
           </View>
 
-          {/* ── Actions ── */}
-          <View style={styles.section}>
-            <TouchableOpacity style={styles.actionRow} onPress={handleSignOut} activeOpacity={0.7}>
-              <Ionicons name="log-out-outline" size={20} color={Colors.textPrimary} />
-              <Text style={styles.actionText}>Sign Out</Text>
-              <Ionicons name="chevron-forward" size={16} color={Colors.textTertiary} />
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.actionRow, styles.dangerRow]} onPress={handleDeleteAccount} activeOpacity={0.7}>
-              <Ionicons name="trash-outline" size={20} color={Colors.danger} />
-              <Text style={[styles.actionText, { color: Colors.danger }]}>Delete Account</Text>
-              <Ionicons name="chevron-forward" size={16} color={Colors.danger} />
-            </TouchableOpacity>
+          {/* ── Security & privacy ── */}
+          <Text style={styles.sectionLabel}>ACCOUNT</Text>
+          <View style={styles.group}>
+            <SettingRow
+              icon="shield-checkmark-outline" tint={DarkColors.online}
+              label="Security & privacy"
+              onPress={() => navigation.navigate('Security')}
+              last
+            />
           </View>
+
+          {/* ── Preferences ── */}
+          <Text style={styles.sectionLabel}>PREFERENCES</Text>
+          <View style={styles.group}>
+            <SettingRow icon="notifications-outline" tint={DarkColors.unpair} label="Notifications" onPress={handleNotifications} />
+            <SettingRow icon="color-palette-outline" tint="#B79CE6" label="Theme" value="Dark" onPress={handleTheme} last />
+          </View>
+
+          {/* ── Support ── */}
+          <Text style={styles.sectionLabel}>SUPPORT</Text>
+          <View style={styles.group}>
+            <SettingRow icon="information-circle-outline" tint={DarkColors.badgeBg} label="About us" onPress={handleAbout} />
+            <SettingRow icon="bug-outline" tint={DarkColors.danger} label="Send bug report" onPress={handleBugReport} last />
+          </View>
+
+          {/* ── Log out ── */}
+          <View style={styles.group}>
+            <SettingRow icon="log-out-outline" label="Log out" danger onPress={handleSignOut} last />
+          </View>
+
+          <Text style={styles.version}>Vibe Remote · v{APP_VERSION}</Text>
 
         </ScrollView>
       )}
@@ -182,44 +200,63 @@ export function ProfileScreen() {
 }
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection:     'row',
-    alignItems:        'center',
-    paddingHorizontal: Spacing.px20,
-    paddingBottom:     Spacing.px16,
-  },
-  appName: { fontSize: 28, fontFamily: FontFamily.serifItalic, color: Colors.textPrimary, lineHeight: 32 },
-  title:   { fontSize: FontSize.cardTitle, fontFamily: FontFamily.loraItalic, fontWeight: '500', color: Colors.textTertiary, letterSpacing: 0.3 },
+  root:    { backgroundColor: DarkColors.bg },
+  header:  { paddingHorizontal: Spacing.px20, paddingBottom: Spacing.px16 },
+  appName: { fontSize: 28, fontFamily: FontFamily.bitcount, color: DarkColors.textPrimary, lineHeight: 34 },
   center:  { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  list:    { paddingHorizontal: Spacing.px20, paddingTop: Spacing.px4, gap: Spacing.px4 },
-  section: { gap: Spacing.px2, marginBottom: Spacing.px16 },
-  sectionLabel: {
-    fontSize: FontSize.microLabel, fontWeight: '700', color: Colors.textTertiary,
-    letterSpacing: 0.6, marginBottom: Spacing.px4, paddingHorizontal: Spacing.px4,
-  },
-  card: {
-    backgroundColor: Colors.bgPrimary, borderRadius: Radius.md,
-    paddingHorizontal: Spacing.px16, paddingVertical: Spacing.px14,
-    borderWidth: 1, borderColor: Colors.borderHairline, gap: Spacing.px4,
-  },
-  fieldLabel: { fontSize: FontSize.metadata, color: Colors.textTertiary, fontWeight: '500' },
-  fieldValue: { fontSize: FontSize.body, color: Colors.textPrimary },
-  editRow:    { flexDirection: 'row', alignItems: 'center', gap: Spacing.px8, marginTop: Spacing.px4 },
-  editInput:  {
-    flex: 1, height: 36, borderRadius: Radius.sm, backgroundColor: Colors.surfaceGlassStrong,
-    borderWidth: 1, borderColor: Colors.borderHairline,
-    paddingHorizontal: Spacing.px10, fontSize: FontSize.body, color: Colors.textPrimary,
-  },
-  saveBtn:      { paddingHorizontal: Spacing.px10, paddingVertical: Spacing.px6, borderRadius: Radius.sm, backgroundColor: Colors.accentDeep },
-  saveBtnText:  { fontSize: FontSize.label, fontWeight: '600', color: '#fff' },
-  cancelBtn:    { paddingHorizontal: Spacing.px8, paddingVertical: Spacing.px6 },
-  cancelBtnText:{ fontSize: FontSize.label, color: Colors.textTertiary },
-  linkText:     { fontSize: FontSize.body, color: Colors.accentDeep, fontWeight: '500', marginTop: Spacing.px4 },
-  actionRow: {
+  list:    { paddingHorizontal: Spacing.px20, paddingTop: Spacing.px4, gap: Spacing.px10 },
+
+  // Profile card
+  profileCard: {
     flexDirection: 'row', alignItems: 'center', gap: Spacing.px12,
-    backgroundColor: Colors.bgPrimary, paddingHorizontal: Spacing.px16, paddingVertical: Spacing.px14,
-    borderWidth: 1, borderColor: Colors.borderHairline, borderRadius: Radius.md, marginBottom: Spacing.px2,
+    backgroundColor: DarkColors.surface, borderRadius: Radius.lg, padding: Spacing.px16,
+    marginBottom: Spacing.px6,
   },
-  dangerRow:  { borderColor: Colors.danger + '30' },
-  actionText: { flex: 1, fontSize: FontSize.body, color: Colors.textPrimary, fontWeight: '500' },
+  avatar: {
+    width: 56, height: 56, borderRadius: Radius.full, backgroundColor: DarkColors.surfaceRaised,
+    alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+  },
+  avatarText: { fontSize: FontSize.displayM, fontWeight: '700', color: DarkColors.textPrimary, fontFamily: FontFamily.googleSans },
+  profileInfo:  { flex: 1, gap: 2 },
+  profileName:  { fontSize: FontSize.cardTitle, fontWeight: '700', color: DarkColors.textPrimary, fontFamily: FontFamily.googleSans },
+  profileEmail: { fontSize: FontSize.metadata, color: DarkColors.textSecondary, fontFamily: FontFamily.googleSans },
+  editIcon: {
+    width: 36, height: 36, borderRadius: Radius.full, backgroundColor: DarkColors.surfaceRaised,
+    alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+  },
+  profileEdit: { flex: 1, gap: Spacing.px8 },
+  nameInput: {
+    height: 40, borderRadius: Radius.sm, backgroundColor: DarkColors.surfaceRaised,
+    borderWidth: 1, borderColor: DarkColors.borderMid,
+    paddingHorizontal: Spacing.px12, fontSize: FontSize.body, color: DarkColors.textPrimary,
+    fontFamily: FontFamily.googleSans,
+  },
+  editBtns: { flexDirection: 'row', justifyContent: 'flex-end', gap: Spacing.px8 },
+
+  // Section
+  sectionLabel: {
+    fontSize: FontSize.microLabel, fontWeight: '700', color: DarkColors.textTertiary,
+    letterSpacing: 0.6, marginTop: Spacing.px8, marginBottom: Spacing.px2, paddingHorizontal: Spacing.px4,
+  },
+  group: {
+    backgroundColor: DarkColors.surface, borderRadius: Radius.lg, overflow: 'hidden',
+  },
+
+  // Row
+  row: { flexDirection: 'row', alignItems: 'center', gap: Spacing.px12, paddingHorizontal: Spacing.px16, paddingVertical: Spacing.px10 },
+  rowBorder: { borderBottomWidth: 1, borderBottomColor: DarkColors.border },
+  rowIcon: { width: 30, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  rowLabel: { flex: 1, fontSize: FontSize.body, color: DarkColors.textPrimary, fontFamily: FontFamily.googleSans, fontWeight: '500' },
+  rowValue: { fontSize: FontSize.label, color: DarkColors.textTertiary, fontFamily: FontFamily.googleSans },
+
+  // Buttons
+  saveBtn: {
+    paddingHorizontal: Spacing.px16, height: 44, borderRadius: Radius.full,
+    backgroundColor: DarkColors.online, alignItems: 'center', justifyContent: 'center',
+  },
+  saveBtnText: { fontSize: FontSize.label, fontWeight: '700', color: DarkColors.bg, fontFamily: FontFamily.googleSans },
+  cancelBtn: { paddingHorizontal: Spacing.px16, height: 44, borderRadius: Radius.full, alignItems: 'center', justifyContent: 'center', backgroundColor: DarkColors.surfaceRaised },
+  cancelBtnText: { fontSize: FontSize.label, color: DarkColors.textSecondary, fontFamily: FontFamily.googleSans, fontWeight: '600' },
+
+  version: { fontSize: FontSize.metadata, color: DarkColors.textTertiary, textAlign: 'center', marginTop: Spacing.px12, fontFamily: FontFamily.googleSans },
 })

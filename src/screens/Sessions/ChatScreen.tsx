@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity,
   TextInput, StatusBar, ActivityIndicator, KeyboardAvoidingView,
@@ -15,12 +15,13 @@ import Ionicons from 'react-native-vector-icons/Ionicons'
 import { useChatFeed } from '../../hooks/useChatFeed'
 import type { ChatItem } from '../../hooks/useChatFeed'
 import { useDecideRequest, useAnswerRequest } from '../../hooks/useRequests'
-import { useSendPrompt, useSessions } from '../../hooks/useSessions'
+import { useSendPrompt, useSessions, useStopSession } from '../../hooks/useSessions'
 import { useMachineChannel } from '../../hooks/useMachineChannel'
 import { GradientBackground } from '../../components/GradientBackground'
 import { HarnessAvatar } from '../../components/HarnessAvatar'
 import { QuestionCard } from '../../components/QuestionCard'
 import { TerminalText } from '../../components/chat/TerminalText'
+import { SPINNER_WORDS } from '../Terminal/spinnerWords'
 import { BackButton } from '../../components/ui/BackButton'
 import { Button } from '../../components/ui/Button'
 import { Badge, RISK_VARIANT } from '../../components/ui/Badge'
@@ -51,6 +52,19 @@ const seenActivityIds   = new Set<string>()
 function dirName(cwd: string | null) {
   if (!cwd) return '~'
   return cwd.split(/[\\/]/).filter(Boolean).pop() ?? cwd
+}
+
+// Rotating status word ("Discombobulating…", "Pondering…") — mirrors what Claude Code
+// shows on the desktop while it's thinking, so the phone reflects the same live status.
+// Cycles every 2s while `active`; freezes (and stops the timer) when the turn isn't live.
+function useSpinnerWord(active: boolean) {
+  const [idx, setIdx] = useState(() => Math.floor(Math.random() * SPINNER_WORDS.length))
+  useEffect(() => {
+    if (!active) return
+    const id = setInterval(() => setIdx(i => (i + 1) % SPINNER_WORDS.length), 2000)
+    return () => clearInterval(id)
+  }, [active])
+  return SPINNER_WORDS[idx]
 }
 
 // ── Agent reasoning — plain CLI output (no bubble), streamed ──────────────────
@@ -111,13 +125,19 @@ function NotifyRow({ event }: { event: TerminalEvent }) {
 
 // ── Task-complete divider ─────────────────────────────────────────────────────
 function StopRow({ event }: { event: TerminalEvent }) {
+  // A turn ends either by finishing normally or by an explicit Stop (from mobile or the
+  // terminal). Both arrive as a `stop` event; an interrupt is tagged status==='stopped' so
+  // the divider reads "Stopped" (not "Task complete"). The summary regex is a fallback for
+  // events written before the explicit tag existed.
+  const stopped = event.status === 'stopped' || /stopp?ed/i.test(event.summary ?? '')
+  const color   = stopped ? DarkColors.unpair : DarkColors.online
   return (
     <View style={styles.stopRow}>
       <View style={styles.stopLine} />
       <View style={styles.stopPill}>
-        <Ionicons name="checkmark-done-circle" size={13} color={DarkColors.online} />
-        <Text style={styles.stopText}>Task complete</Text>
-        <Text style={styles.stopTime}>
+        <Ionicons name={stopped ? 'stop-circle' : 'checkmark-done-circle'} size={13} color={color} />
+        <Text style={[styles.stopText, { color }]}>{stopped ? 'Stopped' : 'Task complete'}</Text>
+        <Text style={[styles.stopTime, { color }]}>
           {formatDistanceToNow(new Date(event.created_at), { addSuffix: true })}
         </Text>
       </View>
@@ -194,9 +214,12 @@ function RequestCard({ req, onApprove, onDeny, onOpen }: {
 }
 
 // ── Animated thinking dots — plain inline (no bubble) ─────────────────────────
+// The rotating status word ("Pondering…", "Cooking…") lives ONLY in the compose bar next
+// to the Stop button — showing it here too would put the same word on screen twice. So this
+// feed indicator is just the animated dots (a typing-indicator), with a static label only
+// for the pending-approval case.
 function ThinkingBubble({ isPendingApproval }: { isPendingApproval: boolean }) {
   const color = isPendingApproval ? DarkColors.unpair : DarkColors.online
-  const label = isPendingApproval ? 'Waiting for approval…' : 'Thinking…'
   return (
     <View style={styles.thinkingRow}>
       <View style={styles.thinkingDots}>
@@ -204,7 +227,9 @@ function ThinkingBubble({ isPendingApproval }: { isPendingApproval: boolean }) {
         <View style={[styles.dot, { backgroundColor: color, opacity: 0.6 }]} />
         <View style={[styles.dot, { backgroundColor: color, opacity: 0.3 }]} />
       </View>
-      <Text style={[styles.thinkingLabel, { color }]}>{label}</Text>
+      {isPendingApproval && (
+        <Text style={[styles.thinkingLabel, { color }]}>Waiting for approval…</Text>
+      )}
     </View>
   )
 }
@@ -277,6 +302,7 @@ export function ChatScreen() {
   const decide  = useDecideRequest()
   const answer  = useAnswerRequest()
   const sendPmt = useSendPrompt()
+  const stopSes = useStopSession()
 
   const { data: sessions = [] } = useSessions()
   const liveSession    = sessions.find(s => s.session_id === sessionId)
@@ -288,10 +314,21 @@ export function ChatScreen() {
   useMachineChannel(liveSession?.machine_id)
 
   const [prompt, setPrompt] = useState(prefill ?? '')
+  const [stopping, setStopping] = useState(false)
+  // Optimistic composer state for the user's OWN action, so the bar reacts instantly
+  // instead of waiting on the feed/status round-trip:
+  //   'sent'    → a prompt was just delivered → lock the composer NOW (no double-send)
+  //   'stopped' → Stop was just tapped        → unlock the composer NOW (turn is ending)
+  // The feed reconciles the steady state and clears this (see the effect below).
+  const [pendingAction, setPendingAction] = useState<null | 'sent' | 'stopped'>(null)
+  const pendingTimer   = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastIdRef      = useRef<string | undefined>(undefined)  // newest feed id, always current
+  const pendingSinceId = useRef<string | undefined>(undefined)  // newest feed id when we armed
   const listRef = useRef<FlatList>(null)
 
   const isNearBottomRef    = useRef(true)
   const didInitialScroll   = useRef(false)
+  const followScheduled    = useRef(false)   // coalesces streaming size-changes into 1 scroll/frame
   const [showJumpToLatest, setShowJumpToLatest] = useState(false)
 
   const handleScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -308,22 +345,87 @@ export function ChatScreen() {
     setShowJumpToLatest(false)
   }, [])
 
+  // Single source of auto-follow. Streaming reasoning grows the content height every frame
+  // (each firing onContentSizeChange), so coalesce to at most ONE instant pin per frame via
+  // rAF — otherwise the per-event scrollToEnd storm fights maintainVisibleContentPosition and
+  // the list bounces. Instant (animated:false) so it never competes with the "Jump to latest"
+  // animated scroll. See CHAT_LOADING_AND_NAVIGATION.md §4.
+  const followBottom = useCallback(() => {
+    if (followScheduled.current) return
+    followScheduled.current = true
+    requestAnimationFrame(() => {
+      followScheduled.current = false
+      listRef.current?.scrollToEnd({ animated: false })
+    })
+  }, [])
+
   useFocusEffect(useCallback(() => {
     if (route.params.prefill) setPrompt(route.params.prefill)
   }, [route.params.prefill])) // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (feed.length > 0 && isNearBottomRef.current) {
-      requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }))
-    }
-  }, [feed.length])
 
   const pendingCount = feed.filter(i => i.kind === 'request' && i.req.status === 'pending').length
   const isActive     = liveStatus === 'active'
   const lastItem     = feed[feed.length - 1]
   const lastId       = lastItem?.id
-  const lastIsStop   = lastItem?.kind === 'stop'
-  const showThinking = isActive && !lastIsStop
+
+  // The sessions-status poll (isActive) lags turn boundaries by up to 15s on this
+  // self-hosted Supabase: `agents` postgres_changes are silently dropped, so idle/active
+  // transitions fall back to the slow poll. The feed, though, streams reliably & instantly
+  // over the broadcast channel — so drive the composer off the feed instead.
+  //
+  // But NOT off the single last row: Claude's Stop hook posts the `stop` event the moment
+  // the turn ends, while the desktop transcript tailer flushes the turn's final narrative as
+  // an `output` up to ~3s LATER — so the newest row right after a finish is usually that
+  // trailing output, not the stop. Keying off the last row alone would then read "still
+  // working" and keep the send bar hidden for seconds after the task is actually done.
+  //
+  // Instead, walk back from the newest row skipping trailing `output`s (late narrative) to
+  // the real lifecycle boundary: a `stop` = turn ended; a running tool / sent prompt /
+  // pending approval = turn live. A `stop` boundary also overrides a stale `isActive`.
+  const feedTurn = useMemo<'ended' | 'active' | null>(() => {
+    for (let i = feed.length - 1; i >= 0; i--) {
+      const it = feed[i]
+      if (it.kind === 'output' || it.kind === 'notify') continue   // not a boundary — skip
+      if (it.kind === 'stop')     return 'ended'
+      if (it.kind === 'activity') return 'active'
+      if (it.kind === 'sent')     return 'active'
+      // A pending approval means the turn is live; a decided one is transitional (the
+      // approved tool is about to run) — skip it and keep looking for the real boundary.
+      if (it.kind === 'request')  { if (it.req.status === 'pending') return 'active'; continue }
+    }
+    return null
+  }, [feed])
+  const feedActive = feedTurn === 'ended' ? false : (feedTurn === 'active' || isActive)
+
+  // The user's own latest action wins immediately; the feed is the steady-state backstop.
+  // 'stopped' forces the composer open even if a trailing reasoning `output` streams in
+  // after the halt (which would otherwise re-lock it); 'sent' forces it closed for the beat
+  // between delivery and the agent's first streamed event.
+  const turnActive =
+    pendingAction === 'stopped' ? false :
+    pendingAction === 'sent'    ? true  :
+    feedActive
+  const showThinking = turnActive
+
+  // Reconcile the optimistic override with the feed, but only against events that arrive
+  // AFTER we armed (so a pre-existing `stop` — e.g. the user sending right after "Task
+  // complete" — can't instantly cancel the new 'sent' lock):
+  //   • 'sent'    → any newer event means the turn is under way; hand back to the feed,
+  //                 which now reads active (trailing `sent`/activity item).
+  //   • 'stopped' → hold the composer open through trailing reasoning; release only once a
+  //                 fresh `stop` event confirms the halt (or the 30s safety timer fires).
+  useEffect(() => { lastIdRef.current = lastId }, [lastId])
+  useEffect(() => {
+    if (!pendingAction) return
+    if (lastId === pendingSinceId.current) return           // nothing new since we armed
+    if (pendingAction === 'sent' || (pendingAction === 'stopped' && feedTurn === 'ended')) {
+      if (pendingTimer.current) clearTimeout(pendingTimer.current)
+      setPendingAction(null)
+    }
+  }, [pendingAction, lastId, feedTurn])
+
+  // Clear the pending timer on unmount.
+  useEffect(() => () => { if (pendingTimer.current) clearTimeout(pendingTimer.current) }, [])
 
   const handleApprove = useCallback((id: string) => decide.mutate({ id, decision: 'approved' }), [decide])
   const handleDeny    = useCallback((id: string) => decide.mutate({ id, decision: 'denied'   }), [decide])
@@ -347,23 +449,77 @@ export function ChatScreen() {
     [handleApprove, handleDeny, handleOpen, handleAnswer, lastId],
   )
 
+  // Latch an optimistic composer state, auto-releasing after 30s so a dropped turn-end
+  // signal can never wedge the bar permanently — the feed truth takes back over.
+  const armPending = useCallback((action: 'sent' | 'stopped') => {
+    pendingSinceId.current = lastIdRef.current   // anchor: only reconcile against newer events
+    setPendingAction(action)
+    if (pendingTimer.current) clearTimeout(pendingTimer.current)
+    pendingTimer.current = setTimeout(() => setPendingAction(null), 30_000)
+  }, [])
+
   async function handleSend() {
     const text = prompt.trim()
     if (!text) return
     try {
       await sendPmt.mutateAsync({ prompt: text, sessionId })
       setPrompt('')
+      // Delivered → lock the composer immediately so a second prompt can't race in before
+      // the agent's first event streams back. The trailing `sent`/activity items keep it
+      // locked after this optimistic latch releases.
+      armPending('sent')
     } catch (err: any) {
-      Alert.alert('Failed to send', err.message ?? 'Please try again')
+      // The server rejects a prompt sent into a mid-turn session (deriveStatus === 'active').
+      // The composer is already gated on turnActive, but state can lag by a beat at the very
+      // start of a turn — this catches the race and explains it instead of showing a generic
+      // failure. Keep the text so the user can resend once the turn ends. See STOP_AGENT_DESIGN.md.
+      if (err?.code === 'session_busy') {
+        Alert.alert('Agent is working', 'Wait for the current turn to finish, or tap Stop, before sending a new prompt.')
+      } else {
+        Alert.alert('Failed to send', err.message ?? 'Please try again')
+      }
     }
   }
 
-  const dirLabel = dirName(cwd)
-  const canType  = liveOnline && pendingCount === 0 && !cliClosed && !harnessOff
+  // Interrupts the current turn only — the CLI process keeps running, same as
+  // pressing Esc yourself. Does NOT close the session. See STOP_AGENT_DESIGN.md.
+  async function handleStop() {
+    setStopping(true)
+    // Unlock the composer immediately on the user's intent — the CLI halts within a beat, but
+    // the turn-end feed signal can lag (or a trailing reasoning line can arrive after it), so
+    // don't wait on it. If the stop somehow doesn't take, the server's session_busy guard
+    // still blocks an actual mid-turn send. Reconciled when the `stop` event lands, or 30s.
+    armPending('stopped')
+    try {
+      await stopSes.mutateAsync(sessionId)
+    } catch (err: any) {
+      Alert.alert('Failed to stop', err.message ?? 'Please try again')
+      setPendingAction(null)   // stop didn't go through — fall back to feed truth
+    } finally {
+      setTimeout(() => setStopping(false), 4000)
+    }
+  }
+
+  // Confirm before interrupting — a Stop is easy to hit by accident and throws away the
+  // work-in-progress turn.
+  function confirmStop() {
+    Alert.alert(
+      'Stop the agent?',
+      'This interrupts the current turn. The CLI keeps running, so you can send a new prompt after.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Stop', style: 'destructive', onPress: handleStop },
+      ],
+    )
+  }
+
+  const dirLabel    = dirName(cwd)
+  const workingWord = useSpinnerWord(turnActive)
+  const canType     = liveOnline && pendingCount === 0 && !cliClosed && !harnessOff && !turnActive
   const canSend  = prompt.trim().length > 0 && !sendPmt.isPending && canType
 
-  const statusColor = isActive ? DarkColors.online : liveStatus === 'idle' ? DarkColors.unpair : DarkColors.textTertiary
-  const statusLabel = isActive ? 'Active' : liveStatus === 'idle' ? 'Idle' : 'Finished'
+  const statusColor = turnActive ? DarkColors.online : liveStatus === 'idle' ? DarkColors.unpair : DarkColors.textTertiary
+  const statusLabel = turnActive ? 'Active' : liveStatus === 'idle' ? 'Idle' : 'Finished'
 
   return (
     <GradientBackground style={styles.root}>
@@ -386,7 +542,7 @@ export function ChatScreen() {
               harness={harness}
               dir={dirLabel}
               statusColor={statusColor}
-              isActive={isActive}
+              isActive={turnActive}
               size={34}
             />
             <Text style={styles.titleText} numberOfLines={1}>{dirLabel}</Text>
@@ -438,18 +594,24 @@ export function ChatScreen() {
               : null
             }
             onContentSizeChange={() => {
+              // Sole auto-follow trigger: pin to the newest content on the initial mount, and
+              // afterwards only while the user is near the bottom (scrolled up → leave them be
+              // and surface "Jump to latest" instead). followBottom coalesces per frame.
               if (!didInitialScroll.current && feed.length > 0) {
-                listRef.current?.scrollToEnd({ animated: false })
                 didInitialScroll.current = true
+                followBottom()
               } else if (isNearBottomRef.current) {
-                listRef.current?.scrollToEnd({ animated: false })
+                followBottom()
               }
             }}
             windowSize={11}
             maxToRenderPerBatch={8}
             updateCellsBatchingPeriod={50}
             initialNumToRender={15}
-            removeClippedSubviews
+            // removeClippedSubviews detaches off-screen rows on Android and is a well-known
+            // source of rows blanking/flickering — especially with variable heights and the
+            // live row growing as it types. Off = stable rendering; windowSize caps memory.
+            removeClippedSubviews={false}
             ListFooterComponent={showThinking
               ? <ThinkingBubble isPendingApproval={pendingCount > 0} />
               : null
@@ -510,6 +672,25 @@ export function ChatScreen() {
               <Text style={styles.pendingText}>
                 {pendingCount} approval{pendingCount > 1 ? 's' : ''} pending — scroll up to decide
               </Text>
+            </View>
+          ) : turnActive ? (
+            <View style={styles.workingRow}>
+              <View style={styles.workingStatus}>
+                <ActivityIndicator size="small" color={DarkColors.online} />
+                <Text style={styles.workingStatusText}>{workingWord}…</Text>
+              </View>
+              <TouchableOpacity
+                style={[styles.stopBtn, stopping && styles.stopBtnDisabled]}
+                onPress={confirmStop}
+                disabled={stopping || stopSes.isPending}
+                activeOpacity={0.8}
+              >
+                {stopping || stopSes.isPending
+                  ? <ActivityIndicator size="small" color="#FFFFFF" />
+                  : <Ionicons name="stop" size={16} color="#FFFFFF" />
+                }
+                <Text style={styles.stopBtnText}>Stop</Text>
+              </TouchableOpacity>
             </View>
           ) : (
             <View style={styles.inputRow}>
@@ -706,6 +887,22 @@ const styles = StyleSheet.create({
   sendBtnDisabled: { backgroundColor: DarkColors.surface },
   pendingNote: { flexDirection: 'row', alignItems: 'center', gap: Spacing.px8, paddingVertical: Spacing.px12, justifyContent: 'center' },
   pendingText: { fontSize: FontSize.label, color: DarkColors.unpair, fontWeight: '500', fontFamily: FontFamily.googleSans },
+
+  // ── Working / Stop (compose bar — replaces the input row while a turn is active) ──
+  workingRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingVertical: Spacing.px8,
+  },
+  workingStatus: { flexDirection: 'row', alignItems: 'center', gap: Spacing.px8 },
+  workingStatusText: { fontSize: FontSize.label, color: DarkColors.textSecondary, fontFamily: FontFamily.googleSans },
+  stopBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: DarkColors.danger,
+    borderRadius: Radius.full,
+    paddingHorizontal: Spacing.px16, paddingVertical: Spacing.px10,
+  },
+  stopBtnDisabled: { opacity: 0.6 },
+  stopBtnText: { fontSize: FontSize.label, fontWeight: '700', color: '#FFFFFF', fontFamily: FontFamily.googleSans },
   closedNote: {
     flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.px8,
     paddingVertical: Spacing.px12, paddingHorizontal: Spacing.px8,

@@ -7,7 +7,8 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
 import { useNavigation } from '@react-navigation/native'
 import { useAuth } from '../../hooks/useAuth'
 import { GradientBackground } from '../../components/GradientBackground'
-import { Colors, Spacing, Radius, FontSize, FontFamily, Shadow } from '../../constants/colors'
+import { DarkColors, Spacing, Radius, FontSize, FontFamily } from '../../constants/colors'
+import LogoIcon from '../../assets/icons/chats.svg'
 import type { AuthStackParamList } from '../../types'
 
 type Nav = NativeStackNavigationProp<AuthStackParamList, 'SignIn'>
@@ -32,16 +33,18 @@ export function SignInScreen() {
     }
   }
 
+  const canSubmit = email.trim().length > 0 && password.length > 0 && !loading
+
   return (
-    <GradientBackground>
-      <StatusBar barStyle="dark-content" translucent backgroundColor="transparent" />
+    <GradientBackground style={styles.bg}>
+      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
       <KeyboardAvoidingView
         style={styles.root}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <View style={styles.content}>
           <View style={styles.logoBox}>
-            <Text style={styles.logoInitials}>VR</Text>
+            <LogoIcon width={36} height={36} color={DarkColors.online} />
           </View>
           <Text style={styles.title}>Vibe Remote</Text>
           <Text style={styles.sub}>Sign in to your account</Text>
@@ -50,7 +53,7 @@ export function SignInScreen() {
             <TextInput
               style={styles.input}
               placeholder="Email"
-              placeholderTextColor={Colors.textTertiary}
+              placeholderTextColor={DarkColors.textTertiary}
               autoCapitalize="none"
               keyboardType="email-address"
               autoComplete="email"
@@ -60,7 +63,7 @@ export function SignInScreen() {
             <TextInput
               style={styles.input}
               placeholder="Password"
-              placeholderTextColor={Colors.textTertiary}
+              placeholderTextColor={DarkColors.textTertiary}
               secureTextEntry
               autoComplete="password"
               value={password}
@@ -69,13 +72,13 @@ export function SignInScreen() {
             />
 
             <TouchableOpacity
-              style={[styles.btn, loading && styles.btnDisabled]}
+              style={[styles.btn, !canSubmit && styles.btnDisabled]}
               onPress={handleSignIn}
-              disabled={loading}
-              activeOpacity={0.8}
+              disabled={!canSubmit}
+              activeOpacity={0.85}
             >
               {loading
-                ? <ActivityIndicator size="small" color={Colors.textInverse} />
+                ? <ActivityIndicator size="small" color={DarkColors.bg} />
                 : <Text style={styles.btnText}>Sign In</Text>
               }
             </TouchableOpacity>
@@ -94,6 +97,7 @@ export function SignInScreen() {
 }
 
 const styles = StyleSheet.create({
+  bg:   { backgroundColor: DarkColors.bg },
   root: { flex: 1 },
   content: {
     flex:              1,
@@ -106,28 +110,21 @@ const styles = StyleSheet.create({
     width:           64,
     height:          64,
     borderRadius:    Radius.lg,
-    backgroundColor: Colors.accentLight,
+    backgroundColor: DarkColors.surfaceRaised,
     alignItems:      'center',
     justifyContent:  'center',
     marginBottom:    Spacing.px8,
   },
-  logoInitials: {
-    fontSize:      18,
-    fontWeight:    '700',
-    fontFamily:    FontFamily.serifBold,
-    color:         Colors.accentDeep,
-    letterSpacing: 1,
-  },
   title: {
-    fontSize:      FontSize.displayM,
-    fontWeight:    '700',
-    fontFamily:    FontFamily.serifBold,
-    color:         Colors.textPrimary,
-    letterSpacing: -0.4,
+    fontSize:   32,
+    fontFamily: FontFamily.bitcount,
+    color:      DarkColors.textPrimary,
+    lineHeight: 40,
   },
   sub: {
     fontSize:     FontSize.body,
-    color:        Colors.textSecondary,
+    color:        DarkColors.textSecondary,
+    fontFamily:   FontFamily.googleSans,
     marginBottom: Spacing.px8,
   },
   form: {
@@ -138,36 +135,38 @@ const styles = StyleSheet.create({
     width:             '100%',
     height:            52,
     borderRadius:      Radius.md,
-    backgroundColor:   Colors.bgPrimary,
+    backgroundColor:   DarkColors.surfaceRaised,
     borderWidth:       1,
-    borderColor:       Colors.borderHairline,
+    borderColor:       DarkColors.borderMid,
     paddingHorizontal: Spacing.px16,
     fontSize:          FontSize.body,
-    color:             Colors.textPrimary,
+    color:             DarkColors.textPrimary,
+    fontFamily:        FontFamily.googleSans,
   },
   btn: {
     width:           '100%',
     height:          52,
     borderRadius:    Radius.full,
-    backgroundColor: Colors.inkBlack,
+    backgroundColor: DarkColors.online,
     alignItems:      'center',
     justifyContent:  'center',
     marginTop:       Spacing.px4,
-    ...Shadow.inkPill,
   },
-  btnDisabled: { opacity: 0.6 },
+  btnDisabled: { opacity: 0.5 },
   btnText: {
     fontSize:   FontSize.body,
-    fontWeight: '600',
-    color:      Colors.textInverse,
+    fontWeight: '700',
+    color:      DarkColors.bg,
+    fontFamily: FontFamily.googleSans,
   },
   switchText: {
-    fontSize:  FontSize.body,
-    color:     Colors.textSecondary,
-    marginTop: Spacing.px8,
+    fontSize:   FontSize.body,
+    color:      DarkColors.textSecondary,
+    fontFamily: FontFamily.googleSans,
+    marginTop:  Spacing.px8,
   },
   switchLink: {
-    color:      Colors.accentDeep,
+    color:      DarkColors.online,
     fontWeight: '600',
   },
 })

@@ -14,7 +14,8 @@ import { pairMachine } from '../../api/server'
 import { getDeviceId } from '../../api/device'
 import { useAppStore } from '../../store/useAppStore'
 import { GradientBackground } from '../../components/GradientBackground'
-import { Colors, Spacing, Radius, FontSize, FontFamily, Shadow } from '../../constants/colors'
+import { DarkColors, Spacing, Radius, FontSize, FontFamily } from '../../constants/colors'
+import LogoIcon from '../../assets/icons/chats.svg'
 import type { QRPayload } from '../../types'
 
 const FRAME  = 240
@@ -39,7 +40,7 @@ function ScanBrackets({ state }: { state: 'idle' | 'success' | 'error' }) {
     return () => loop.stop()
   }, [state])
 
-  const color = state === 'success' ? Colors.success : state === 'error' ? Colors.danger : Colors.accent
+  const color = state === 'success' ? DarkColors.online : state === 'error' ? DarkColors.danger : DarkColors.online
 
   return (
     <Animated.View style={[styles.frame, { transform: [{ scale }] }]}>
@@ -133,18 +134,21 @@ export function QRScanScreen() {
 
   if (!hasPermission) {
     return (
-      <GradientBackground>
-        <StatusBar barStyle="dark-content" translucent backgroundColor="transparent" />
+      <GradientBackground style={styles.bg}>
+        <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
         <View style={styles.permCenter}>
           <View style={styles.logoBox}>
-            <Text style={styles.logoInitials}>VR</Text>
+            <LogoIcon width={32} height={32} color={DarkColors.online} />
           </View>
           <Text style={styles.permTitle}>Camera access needed</Text>
           <Text style={styles.permSub}>
             Point your camera at the QR code on the machine dashboard to connect it.
           </Text>
-          <TouchableOpacity style={styles.inkBtn} onPress={requestPermission} activeOpacity={0.8}>
+          <TouchableOpacity style={styles.inkBtn} onPress={requestPermission} activeOpacity={0.85}>
             <Text style={styles.inkBtnText}>Grant camera access</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.permCancel} activeOpacity={0.7}>
+            <Text style={styles.permCancelText}>Not now</Text>
           </TouchableOpacity>
         </View>
       </GradientBackground>
@@ -153,9 +157,17 @@ export function QRScanScreen() {
 
   if (!device) {
     return (
-      <GradientBackground>
+      <GradientBackground style={styles.bg}>
+        <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
         <View style={styles.permCenter}>
-          <Text style={styles.permSub}>No camera found on this device.</Text>
+          <View style={styles.logoBox}>
+            <LogoIcon width={32} height={32} color={DarkColors.online} />
+          </View>
+          <Text style={styles.permTitle}>No camera found</Text>
+          <Text style={styles.permSub}>This device doesn’t have a usable camera to scan the QR code.</Text>
+          <TouchableOpacity style={styles.inkBtn} onPress={() => navigation.goBack()} activeOpacity={0.85}>
+            <Text style={styles.inkBtnText}>Go back</Text>
+          </TouchableOpacity>
         </View>
       </GradientBackground>
     )
@@ -175,7 +187,7 @@ export function QRScanScreen() {
       <View style={styles.overlay}>
         <View style={styles.topSection}>
           <View style={styles.logoBox}>
-            <Text style={styles.logoInitials}>VR</Text>
+            <LogoIcon width={32} height={32} color={DarkColors.online} />
           </View>
           <Text style={styles.cameraTitle}>Connect Machine</Text>
           <Text style={styles.cameraSubtitle}>
@@ -187,7 +199,7 @@ export function QRScanScreen() {
           <ScanBrackets state={scanState} />
           {loading && (
             <View style={styles.spinnerWrap}>
-              <ActivityIndicator size="large" color={Colors.success} />
+              <ActivityIndicator size="large" color={DarkColors.online} />
             </View>
           )}
         </View>
@@ -195,13 +207,13 @@ export function QRScanScreen() {
         <View style={styles.bottomSection}>
           <View style={[
             styles.statusPill,
-            scanState === 'success' && { backgroundColor: Colors.risk.low.bg,  borderColor: Colors.risk.low.border  },
-            scanState === 'error'   && { backgroundColor: Colors.risk.high.bg,  borderColor: Colors.risk.high.border },
+            scanState === 'success' && styles.statusPillSuccess,
+            scanState === 'error'   && styles.statusPillError,
           ]}>
             <Text style={[
               styles.statusText,
-              scanState === 'success' && { color: Colors.risk.low.text  },
-              scanState === 'error'   && { color: Colors.risk.high.text },
+              scanState === 'success' && { color: DarkColors.online },
+              scanState === 'error'   && { color: DarkColors.danger },
             ]}>
               {statusMsg}
             </Text>
@@ -216,6 +228,7 @@ export function QRScanScreen() {
 }
 
 const styles = StyleSheet.create({
+  bg:   { backgroundColor: DarkColors.bg },
   root: { flex: 1, backgroundColor: '#000' },
   permCenter: {
     flex: 1, justifyContent: 'center', alignItems: 'center',
@@ -223,35 +236,34 @@ const styles = StyleSheet.create({
   },
   logoBox: {
     width: 60, height: 60, borderRadius: Radius.lg,
-    backgroundColor: Colors.accentLight,
+    backgroundColor: DarkColors.surfaceRaised,
     alignItems: 'center', justifyContent: 'center', marginBottom: Spacing.px8,
   },
-  logoInitials: {
-    fontSize: 16, fontWeight: '700', fontFamily: FontFamily.serifBold,
-    color: Colors.accentDeep, letterSpacing: 1,
-  },
   permTitle: {
-    fontSize: FontSize.displayM, fontWeight: '500', fontFamily: FontFamily.serifBold,
-    color: Colors.textPrimary, textAlign: 'center', letterSpacing: -0.4,
+    fontSize: FontSize.displayM, fontWeight: '700', fontFamily: FontFamily.googleSans,
+    color: DarkColors.textPrimary, textAlign: 'center', letterSpacing: -0.4,
   },
   permSub: {
-    fontSize: FontSize.body, color: Colors.textSecondary,
+    fontSize: FontSize.body, color: DarkColors.textSecondary, fontFamily: FontFamily.googleSans,
     textAlign: 'center', lineHeight: 22, maxWidth: 280,
   },
   inkBtn: {
     marginTop: Spacing.px8, height: 56, borderRadius: Radius.full,
-    backgroundColor: Colors.inkBlack, paddingHorizontal: Spacing.px32,
-    alignItems: 'center', justifyContent: 'center', ...Shadow.inkPill,
+    backgroundColor: DarkColors.online, paddingHorizontal: Spacing.px32,
+    alignItems: 'center', justifyContent: 'center',
   },
-  inkBtnText: { fontSize: FontSize.body, fontWeight: '600', color: Colors.textInverse },
+  inkBtnText: { fontSize: FontSize.body, fontWeight: '700', color: DarkColors.bg, fontFamily: FontFamily.googleSans },
+  permCancel: { paddingVertical: Spacing.px8, paddingHorizontal: Spacing.px16 },
+  permCancelText: { fontSize: FontSize.body, color: DarkColors.textTertiary, fontWeight: '500', fontFamily: FontFamily.googleSans },
+
   overlay: { ...StyleSheet.absoluteFill, justifyContent: 'space-between', alignItems: 'center' },
   topSection: {
     alignItems: 'center', paddingTop: Platform.OS === 'ios' ? 72 : 56,
     paddingHorizontal: Spacing.px32, gap: Spacing.px8,
-    backgroundColor: 'rgba(0,0,0,0.55)', width: '100%', paddingBottom: Spacing.px24,
+    backgroundColor: 'rgba(8,33,52,0.72)', width: '100%', paddingBottom: Spacing.px24,
   },
-  cameraTitle: { fontSize: FontSize.displayM, fontWeight: '700', color: '#FFFFFF', letterSpacing: -0.3 },
-  cameraSubtitle: { fontSize: FontSize.label, color: 'rgba(255,255,255,0.70)', textAlign: 'center', lineHeight: 20 },
+  cameraTitle: { fontSize: FontSize.displayM, fontWeight: '700', color: '#FFFFFF', fontFamily: FontFamily.googleSans, letterSpacing: -0.3 },
+  cameraSubtitle: { fontSize: FontSize.label, color: 'rgba(255,255,255,0.70)', fontFamily: FontFamily.googleSans, textAlign: 'center', lineHeight: 20 },
   frameWrap: { alignItems: 'center', justifyContent: 'center' },
   frame: { width: FRAME, height: FRAME, justifyContent: 'center', alignItems: 'center' },
   corner: { position: 'absolute', width: CORNER, height: CORNER },
@@ -263,14 +275,16 @@ const styles = StyleSheet.create({
   bottomSection: {
     paddingBottom: Platform.OS === 'ios' ? 60 : 40,
     paddingHorizontal: Spacing.px32, alignItems: 'center', width: '100%',
-    backgroundColor: 'rgba(0,0,0,0.55)', paddingTop: Spacing.px24, gap: Spacing.px12,
+    backgroundColor: 'rgba(8,33,52,0.72)', paddingTop: Spacing.px24, gap: Spacing.px12,
   },
   statusPill: {
-    backgroundColor: 'rgba(0,0,0,0.50)', borderRadius: Radius.full,
+    backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: Radius.full,
     paddingHorizontal: Spacing.px16, paddingVertical: Spacing.px8,
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)',
   },
-  statusText: { fontSize: FontSize.label, color: 'rgba(255,255,255,0.80)', fontWeight: '500', textAlign: 'center' },
+  statusPillSuccess: { backgroundColor: 'rgba(39,224,126,0.15)', borderColor: 'rgba(39,224,126,0.40)' },
+  statusPillError:   { backgroundColor: 'rgba(239,83,80,0.15)',  borderColor: 'rgba(239,83,80,0.40)' },
+  statusText: { fontSize: FontSize.label, color: 'rgba(255,255,255,0.80)', fontFamily: FontFamily.googleSans, fontWeight: '500', textAlign: 'center' },
   cancelBtn: { paddingVertical: Spacing.px8, paddingHorizontal: Spacing.px16 },
-  cancelText: { fontSize: FontSize.body, color: 'rgba(255,255,255,0.65)', fontWeight: '500' },
+  cancelText: { fontSize: FontSize.body, color: 'rgba(255,255,255,0.65)', fontFamily: FontFamily.googleSans, fontWeight: '500' },
 })

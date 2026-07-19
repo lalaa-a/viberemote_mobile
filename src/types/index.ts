@@ -220,7 +220,12 @@ export type AuthStackParamList = {
 export type TabParamList = {
   ChatsTab:    NavigatorScreenParams<SessionsStackParamList> | undefined
   MachinesTab: undefined
-  ProfileTab:  undefined
+  ProfileTab:  NavigatorScreenParams<ProfileStackParamList> | undefined
+}
+
+export type ProfileStackParamList = {
+  Settings: undefined
+  Security: undefined
 }
 
 export interface TerminalEvent {
@@ -232,7 +237,7 @@ export interface TerminalEvent {
   tool_name:  string | null
   summary:    string | null
   detail:     string | null
-  status:     'success' | 'error' | null
+  status:     'success' | 'error' | 'stopped' | null   // 'stopped' → user-interrupted turn (StopRow tag)
   created_at: string
 }
 

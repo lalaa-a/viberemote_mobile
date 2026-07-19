@@ -5,6 +5,7 @@ import {
   fetchPrompts,
   sendPrompt,
   cancelPrompt,
+  stopSession,
 } from '../api/server'
 
 export function useSessions() {
@@ -55,5 +56,15 @@ export function useCancelPrompt() {
     onSettled:  () => {
       queryClient.invalidateQueries({ queryKey: ['prompts'] })
     },
+  })
+}
+
+// Interrupts the current turn only — does NOT kill the harness CLI process.
+// See STOP_AGENT_DESIGN.md.
+export function useStopSession() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (sessionId: string) => stopSession(sessionId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['sessions'] }),
   })
 }

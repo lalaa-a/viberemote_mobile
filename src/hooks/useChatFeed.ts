@@ -86,6 +86,13 @@ export function useChatFeed(sessionId: string) {
     getNextPageParam: last => (last.hasMore ? last.nextCursor ?? undefined : undefined),
     staleTime:       10_000,
     refetchInterval: 30_000,  // safety net only — Realtime carries the live edge
+    // ALWAYS refetch when the chat is (re)opened. Realtime only appends while this screen is
+    // mounted; leaving tears the subscription down, so any event that lands while you're away
+    // — most importantly the turn-end `stop` — never reaches the cache. Without this, coming
+    // back within staleTime serves a stale feed whose last boundary is still an activity, so
+    // the composer wrongly shows the agent "working" after a Stop. Refetching on mount pulls
+    // the stop (and any trailing output) so the feed walk correctly reads the turn as ended.
+    refetchOnMount:  'always',
   })
 
   // Realtime: push new rows to the live edge and patch decisions in place.

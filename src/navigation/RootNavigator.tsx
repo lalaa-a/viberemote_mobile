@@ -3,7 +3,9 @@ import {
   NavigationContainer,
   createNavigationContainerRef,
   getFocusedRouteNameFromRoute,
+  DarkTheme,
 } from '@react-navigation/native'
+import type { Theme } from '@react-navigation/native'
 import { createNativeStackNavigator } from '@react-navigation/native-stack'
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs'
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs'
@@ -29,6 +31,8 @@ import { FileBrowserScreen } from '../screens/Sessions/FileBrowserScreen'
 import { RequestDetailScreen } from '../screens/Requests/RequestDetailScreen'
 import { MachinesScreen } from '../screens/Machines/MachinesScreen'
 import { ProfileScreen } from '../screens/Profile/ProfileScreen'
+import { SecurityScreen } from '../screens/Profile/SecurityScreen'
+import { AppLockGate } from '../components/AppLockGate'
 import { useSessions } from '../hooks/useSessions'
 import { usePushNotifications } from '../hooks/usePushNotifications'
 import { Colors, DarkColors, Radius, Shadow, FontFamily, FontSize } from '../constants/colors'
@@ -37,6 +41,7 @@ import type {
   AuthStackParamList,
   TabParamList,
   SessionsStackParamList,
+  ProfileStackParamList,
 } from '../types'
 
 export const navigationRef = createNavigationContainerRef<RootStackParamList>()
@@ -44,17 +49,34 @@ export const navigationRef = createNavigationContainerRef<RootStackParamList>()
 const RootStack    = createNativeStackNavigator<RootStackParamList>()
 const AuthStack    = createNativeStackNavigator<AuthStackParamList>()
 const Tab          = createBottomTabNavigator<TabParamList>()
+const ProfileStack = createNativeStackNavigator<ProfileStackParamList>()
 const SessionsStack = createNativeStackNavigator<SessionsStackParamList>()
+
+// Without a theme, NavigationContainer defaults to the LIGHT theme (white background), so
+// every screen/tab transition briefly flashes white before the screen's opaque
+// GradientBackground paints — that's the tab "flick". Anchor the navigator background to the
+// app's dark base so any transient frame is dark, not white.
+const navTheme: Theme = {
+  ...DarkTheme,
+  colors: { ...DarkTheme.colors, background: DarkColors.bg, card: DarkColors.bg },
+}
+
+// native-stack gives each screen a transparent native container during the push/pop slide,
+// so the white window background shows through even though the screen's own View is dark —
+// that's the "flick" when entering/leaving a sub-screen. Pin the native content background
+// to the app's dark base on every stack so transitions are dark end-to-end.
+const DARK_CONTENT = { backgroundColor: DarkColors.bg }
 
 const HEADER_OPTS = {
   headerStyle:      { backgroundColor: Colors.cream },
   headerTintColor:  Colors.accentDeep,
   headerTitleStyle: { color: Colors.textPrimary, fontSize: FontSize.label, fontWeight: '600' as const },
   headerBackTitle:  'Back',
+  contentStyle:     DARK_CONTENT,
 }
 
 // Full-screen chat-detail routes hide the floating tab bar (Telegram-style).
-const HIDE_TAB_BAR_ROUTES = ['Chat', 'RequestDetail', 'FileBrowser']
+const HIDE_TAB_BAR_ROUTES = ['Chat', 'RequestDetail', 'FileBrowser', 'Security']
 
 // ── Tab metadata ──────────────────────────────────────────────────────────────
 // Custom SVG icons (stroke="currentColor" → tinted via the `color` prop).
@@ -115,6 +137,16 @@ function FloatingTabBar({ state, navigation, badges }: FloatingTabBarProps) {
   )
 }
 
+// ── Profile stack ─────────────────────────────────────────────────────────────
+function ProfileNavigator() {
+  return (
+    <ProfileStack.Navigator screenOptions={{ headerShown: false, contentStyle: DARK_CONTENT }}>
+      <ProfileStack.Screen name="Settings" component={ProfileScreen} />
+      <ProfileStack.Screen name="Security" component={SecurityScreen} />
+    </ProfileStack.Navigator>
+  )
+}
+
 // ── Chats stack ───────────────────────────────────────────────────────────────
 function ChatsNavigator() {
   return (
@@ -136,7 +168,12 @@ function AppNavigator() {
 
   return (
     <Tab.Navigator
-      screenOptions={{ headerShown: false }}
+      screenOptions={{
+        headerShown: false,
+        // Instant switch + dark scene background = no white flash between tabs.
+        animation:  'none',
+        sceneStyle: { backgroundColor: DarkColors.bg },
+      }}
       tabBar={(props) => {
         const tabRoute = props.state.routes[props.state.index]
         const nested   = getFocusedRouteNameFromRoute(tabRoute) ?? ''
@@ -146,7 +183,7 @@ function AppNavigator() {
     >
       <Tab.Screen name="ChatsTab"    component={ChatsNavigator} />
       <Tab.Screen name="MachinesTab" component={MachinesScreen} />
-      <Tab.Screen name="ProfileTab"  component={ProfileScreen} />
+      <Tab.Screen name="ProfileTab"  component={ProfileNavigator} />
     </Tab.Navigator>
   )
 }
@@ -154,7 +191,7 @@ function AppNavigator() {
 // ── Auth stack ────────────────────────────────────────────────────────────────
 function AuthNavigator() {
   return (
-    <AuthStack.Navigator screenOptions={{ headerShown: false }}>
+    <AuthStack.Navigator screenOptions={{ headerShown: false, contentStyle: DARK_CONTENT }}>
       <AuthStack.Screen name="SignIn" component={SignInScreen} />
       <AuthStack.Screen name="SignUp" component={SignUpScreen} />
     </AuthStack.Navigator>
@@ -207,16 +244,18 @@ export function RootNavigator() {
   if (loading) return null
 
   return (
-    <NavigationContainer ref={navigationRef}>
+    <NavigationContainer ref={navigationRef} theme={navTheme}>
       <DeviceBootstrap />
-      <RootStack.Navigator screenOptions={{ headerShown: false }}>
-        {session
-          ? <RootStack.Screen name="App"  component={AppNavigator} />
-          : <RootStack.Screen name="Auth" component={AuthNavigator} />
-        }
-        {/* QRScan presented as a full-screen modal from any tab */}
-        <RootStack.Screen name="QRScan" component={QRScanScreen} options={{ presentation: 'modal', headerShown: false }} />
-      </RootStack.Navigator>
+      <AppLockGate>
+        <RootStack.Navigator screenOptions={{ headerShown: false, contentStyle: DARK_CONTENT }}>
+          {session
+            ? <RootStack.Screen name="App"  component={AppNavigator} />
+            : <RootStack.Screen name="Auth" component={AuthNavigator} />
+          }
+          {/* QRScan presented as a full-screen modal from any tab */}
+          <RootStack.Screen name="QRScan" component={QRScanScreen} options={{ presentation: 'modal', headerShown: false }} />
+        </RootStack.Navigator>
+      </AppLockGate>
     </NavigationContainer>
   )
 }

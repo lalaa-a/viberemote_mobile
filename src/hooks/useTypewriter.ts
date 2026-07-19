@@ -40,9 +40,14 @@ export function useTypewriter(text: string, { cps = 50, enabled = true, onDone }
 
     setCount(0)
     doneRef.current = false
-    const stepMs = Math.max(8, 1000 / cps)
-    // Reveal a few chars per tick so long outputs don't take forever.
-    const perTick = Math.max(1, Math.round(text.length / 400))
+    // Smoothness over literal cps: each tick re-renders the live row AND grows its height,
+    // which fires the list's onContentSizeChange → a scroll pin. The old cadence could run
+    // ~400 ticks for one block, thrashing layout+scroll and making the feed flickery. Cap the
+    // WHOLE reveal to a small number of ticks (≤ MAX_TICKS) at a frame-friendly interval, so a
+    // long block still reveals in under ~0.5s with at most ~24 re-renders instead of hundreds.
+    const MAX_TICKS = 24
+    const stepMs  = Math.max(16, 1000 / cps)
+    const perTick = Math.max(1, Math.ceil(text.length / MAX_TICKS))
 
     const timer = setInterval(() => {
       setCount(prev => {

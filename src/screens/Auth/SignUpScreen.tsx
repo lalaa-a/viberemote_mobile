@@ -7,7 +7,8 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
 import { useNavigation } from '@react-navigation/native'
 import { useAuth } from '../../hooks/useAuth'
 import { GradientBackground } from '../../components/GradientBackground'
-import { Colors, Spacing, Radius, FontSize, FontFamily, Shadow } from '../../constants/colors'
+import { DarkColors, Spacing, Radius, FontSize, FontFamily } from '../../constants/colors'
+import LogoIcon from '../../assets/icons/chats.svg'
 import type { AuthStackParamList } from '../../types'
 
 type Nav = NativeStackNavigationProp<AuthStackParamList, 'SignUp'>
@@ -39,15 +40,19 @@ export function SignUpScreen() {
 
   if (sent) {
     return (
-      <GradientBackground>
+      <GradientBackground style={styles.bg}>
+        <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
         <View style={styles.root}>
           <View style={styles.content}>
+            <View style={styles.logoBox}>
+              <LogoIcon width={36} height={36} color={DarkColors.online} />
+            </View>
             <Text style={styles.title}>Check your email</Text>
             <Text style={styles.sub}>
               We sent a confirmation link to {email}.{'\n'}
               Click it and then sign in.
             </Text>
-            <TouchableOpacity onPress={() => navigation.navigate('SignIn')} style={styles.btn} activeOpacity={0.8}>
+            <TouchableOpacity onPress={() => navigation.navigate('SignIn')} style={styles.btnWide} activeOpacity={0.85}>
               <Text style={styles.btnText}>Go to Sign In</Text>
             </TouchableOpacity>
           </View>
@@ -56,16 +61,18 @@ export function SignUpScreen() {
     )
   }
 
+  const canSubmit = email.trim().length > 0 && password.length > 0 && !loading
+
   return (
-    <GradientBackground>
-      <StatusBar barStyle="dark-content" translucent backgroundColor="transparent" />
+    <GradientBackground style={styles.bg}>
+      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
       <KeyboardAvoidingView
         style={styles.root}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <View style={styles.content}>
           <View style={styles.logoBox}>
-            <Text style={styles.logoInitials}>VR</Text>
+            <LogoIcon width={36} height={36} color={DarkColors.online} />
           </View>
           <Text style={styles.title}>Create account</Text>
           <Text style={styles.sub}>Start using Vibe Remote</Text>
@@ -74,7 +81,7 @@ export function SignUpScreen() {
             <TextInput
               style={styles.input}
               placeholder="Email"
-              placeholderTextColor={Colors.textTertiary}
+              placeholderTextColor={DarkColors.textTertiary}
               autoCapitalize="none"
               keyboardType="email-address"
               autoComplete="email"
@@ -84,7 +91,7 @@ export function SignUpScreen() {
             <TextInput
               style={styles.input}
               placeholder="Password (min 6 chars)"
-              placeholderTextColor={Colors.textTertiary}
+              placeholderTextColor={DarkColors.textTertiary}
               secureTextEntry
               autoComplete="new-password"
               value={password}
@@ -93,13 +100,13 @@ export function SignUpScreen() {
             />
 
             <TouchableOpacity
-              style={[styles.btn, loading && styles.btnDisabled]}
+              style={[styles.btn, !canSubmit && styles.btnDisabled]}
               onPress={handleSignUp}
-              disabled={loading}
-              activeOpacity={0.8}
+              disabled={!canSubmit}
+              activeOpacity={0.85}
             >
               {loading
-                ? <ActivityIndicator size="small" color={Colors.textInverse} />
+                ? <ActivityIndicator size="small" color={DarkColors.bg} />
                 : <Text style={styles.btnText}>Create Account</Text>
               }
             </TouchableOpacity>
@@ -118,6 +125,7 @@ export function SignUpScreen() {
 }
 
 const styles = StyleSheet.create({
+  bg:   { backgroundColor: DarkColors.bg },
   root: { flex: 1 },
   content: {
     flex:              1,
@@ -130,32 +138,26 @@ const styles = StyleSheet.create({
     width:           64,
     height:          64,
     borderRadius:    Radius.lg,
-    backgroundColor: Colors.accentLight,
+    backgroundColor: DarkColors.surfaceRaised,
     alignItems:      'center',
     justifyContent:  'center',
     marginBottom:    Spacing.px8,
   },
-  logoInitials: {
-    fontSize:      18,
-    fontWeight:    '700',
-    fontFamily:    FontFamily.serifBold,
-    color:         Colors.accentDeep,
-    letterSpacing: 1,
-  },
   title: {
     fontSize:      FontSize.displayM,
     fontWeight:    '700',
-    fontFamily:    FontFamily.serifBold,
-    color:         Colors.textPrimary,
+    fontFamily:    FontFamily.googleSans,
+    color:         DarkColors.textPrimary,
     letterSpacing: -0.4,
     textAlign:     'center',
   },
   sub: {
-    fontSize:   FontSize.body,
-    color:      Colors.textSecondary,
-    textAlign:  'center',
-    lineHeight: 22,
-    maxWidth:   280,
+    fontSize:     FontSize.body,
+    color:        DarkColors.textSecondary,
+    fontFamily:   FontFamily.googleSans,
+    textAlign:    'center',
+    lineHeight:   22,
+    maxWidth:     280,
     marginBottom: Spacing.px8,
   },
   form: {
@@ -166,36 +168,47 @@ const styles = StyleSheet.create({
     width:             '100%',
     height:            52,
     borderRadius:      Radius.md,
-    backgroundColor:   Colors.bgPrimary,
+    backgroundColor:   DarkColors.surfaceRaised,
     borderWidth:       1,
-    borderColor:       Colors.borderHairline,
+    borderColor:       DarkColors.borderMid,
     paddingHorizontal: Spacing.px16,
     fontSize:          FontSize.body,
-    color:             Colors.textPrimary,
+    color:             DarkColors.textPrimary,
+    fontFamily:        FontFamily.googleSans,
   },
   btn: {
     width:           '100%',
     height:          52,
     borderRadius:    Radius.full,
-    backgroundColor: Colors.inkBlack,
+    backgroundColor: DarkColors.online,
     alignItems:      'center',
     justifyContent:  'center',
     marginTop:       Spacing.px4,
-    ...Shadow.inkPill,
   },
-  btnDisabled: { opacity: 0.6 },
+  btnWide: {
+    height:          52,
+    borderRadius:    Radius.full,
+    backgroundColor: DarkColors.online,
+    alignItems:      'center',
+    justifyContent:  'center',
+    paddingHorizontal: Spacing.px32,
+    marginTop:       Spacing.px4,
+  },
+  btnDisabled: { opacity: 0.5 },
   btnText: {
     fontSize:   FontSize.body,
-    fontWeight: '600',
-    color:      Colors.textInverse,
+    fontWeight: '700',
+    color:      DarkColors.bg,
+    fontFamily: FontFamily.googleSans,
   },
   switchText: {
-    fontSize:  FontSize.body,
-    color:     Colors.textSecondary,
-    marginTop: Spacing.px8,
+    fontSize:   FontSize.body,
+    color:      DarkColors.textSecondary,
+    fontFamily: FontFamily.googleSans,
+    marginTop:  Spacing.px8,
   },
   switchLink: {
-    color:      Colors.accentDeep,
+    color:      DarkColors.online,
     fontWeight: '600',
   },
 })

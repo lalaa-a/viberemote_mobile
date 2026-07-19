@@ -178,6 +178,13 @@ export function sendPrompt(prompt: string, sessionId?: string): Promise<{ id: st
   })
 }
 
+// ── Stop (interrupt the current turn — does not kill the CLI) ─────────────────
+export function stopSession(sessionId: string): Promise<{ id: string }> {
+  return request<{ id: string }>(`/mobile/sessions/${encodeURIComponent(sessionId)}/stop`, {
+    method: 'POST',
+  })
+}
+
 export function fetchPrompts(): Promise<MobileCommand[]> {
   return request<MobileCommand[]>('/mobile/prompts')
 }
