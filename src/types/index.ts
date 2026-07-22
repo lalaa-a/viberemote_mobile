@@ -144,6 +144,20 @@ export interface AgentSession {
   pending_count:     number
   last_activity_at:  string
   started_at:        string
+  // Live token usage — durable seed for the compose-bar counter (turn resets each turn).
+  turn_tokens_input?:     number
+  turn_tokens_output?:    number
+  session_tokens_input?:  number
+  session_tokens_output?: number
+}
+
+// Live token usage pushed over the session 'usage' broadcast (TOKEN_USAGE_STREAMING_DESIGN.md).
+export interface SessionUsage {
+  turnInput:      number
+  turnOutput:     number
+  sessionInput?:  number
+  sessionOutput?: number
+  cost?:          number | null
 }
 
 // ── Harness state (read from /harness/:machineId) ─────────────────────────────

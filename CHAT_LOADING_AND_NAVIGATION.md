@@ -154,9 +154,40 @@ a turn streamed. Two more root causes, both fixed:
    variable heights and the live row growing. Set to `false`; `windowSize` still caps
    memory.
 
-If streaming still isn't perfectly smooth after these, that's the signal to move to an
-**inverted `FlatList`** (§3-B, the growing live row pins at the bottom automatically
-with no scroll calls) or **FlashList** (§3-C).
+### FINAL RESOLUTION — moved to the inverted list (§3-B)
+
+The fixes above reduced the thrash but **did not** fix the flicker, because they treated the
+symptom. The actual root cause is `maintainVisibleContentPosition` itself:
+
+> **`maintainVisibleContentPosition` does not hold position when the data updates faster than
+> ~200ms** — [facebook/react-native#53542](https://github.com/react/react-native/issues/53542).
+
+That is exactly the streaming case (typewriter re-renders + appended events), so MVCP was
+silently dropping the anchor and fighting our `scrollToEnd` on every tick. No amount of
+coalescing or throttling the scroll fixes it, because the prop is unreliable under that load.
+
+So the list is now **`inverted`**, which deletes the whole problem class:
+
+- **`data` is reversed** (`invertedFeed`, newest first); `feed` stays oldest→newest so all the
+  turn/boundary logic is unchanged.
+- **No `scrollToEnd`, no `onContentSizeChange` follow, no `didInitialScroll`** — offset 0 *is*
+  the bottom, so the newest row stays pinned automatically as it grows while typing.
+- **No `maintainVisibleContentPosition`** — removed entirely (the bug source).
+- **Pagination flipped**: `onStartReached` → `onEndReached`. Older pages now *append* to the
+  far end of the data instead of prepending, so loading history can't shift the viewport.
+- **Header/Footer swapped**: `inverted` flips them visually, so the older-loading spinner is
+  `ListFooterComponent` (top) and the thinking indicator is `ListHeaderComponent` (bottom).
+- **`handleScroll`** now tests `contentOffset.y < 120` (near bottom in inverted coords), and
+  "Jump to latest" is `scrollToOffset({ offset: 0 })`.
+- **`listContent` padding swapped** — the inverted container flips top/bottom.
+
+Bonus: `initialNumToRender` now renders the **newest** rows first, so opening a chat no longer
+shows the oldest messages and snaps to the bottom.
+
+If it is ever still not smooth on very long conversations, the remaining upgrade is
+**FlashList** (§3-C) — cell recycling instead of virtualization, which handles variable-height
+chat rows better; keep the inverted setup and drop `windowSize`/`maxToRenderPerBatch`/
+`removeClippedSubviews`.
 
 ### If you later go to FlashList (strategy C)
 

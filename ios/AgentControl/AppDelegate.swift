@@ -24,7 +24,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     window = UIWindow(frame: UIScreen.main.bounds)
 
     factory.startReactNative(
-      withModuleName: "AgentControl",
+      // MUST match `name` in app.json — the key index.js registers with AppRegistry.
+      withModuleName: "VibeRemote",
       in: window,
       launchOptions: launchOptions
     )

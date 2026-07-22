@@ -17,11 +17,11 @@
  *   request  → request (approval card)
  *   prompt   → sent (user prompt bubble)
  */
-import { useMemo, useEffect, useRef } from 'react'
+import { useMemo, useEffect, useRef, useState } from 'react'
 import { useInfiniteQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query'
 import { fetchSessionFeed } from '../api/server'
 import { getRealtimeClient } from '../api/realtime'
-import type { TerminalEvent, PendingRequest, MobileCommand, FeedPage, FeedRow } from '../types'
+import type { TerminalEvent, PendingRequest, MobileCommand, FeedPage, FeedRow, SessionUsage } from '../types'
 
 // ── Chat item discriminated union ──────────────────────────────────────────────
 
@@ -78,6 +78,10 @@ export function useChatFeed(sessionId: string) {
   const qc = useQueryClient()
   const feedKey = feedKeyFor(sessionId)
 
+  // Live token usage for the compose-bar counter, pushed over the session 'usage' broadcast.
+  // Null until the first broadcast — ChatScreen seeds from the durable session value meanwhile.
+  const [usage, setUsage] = useState<SessionUsage | null>(null)
+
   const query = useInfiniteQuery<FeedPage>({
     queryKey: feedKey,
     queryFn: ({ pageParam }) =>
@@ -126,6 +130,9 @@ export function useChatFeed(sessionId: string) {
         // LIVE_FEED_REALTIME_DIAGNOSIS.md). The server fires this on every feed
         // write; we refetch the user-authed feed endpoint to pull the new tail.
         .on('broadcast', { event: 'feed' }, scheduleReconcile)
+        // Live token usage for the compose-bar counter. Numeric-only payload rides the
+        // broadcast directly (non-sensitive) — no refetch. See TOKEN_USAGE_STREAMING_DESIGN.md.
+        .on('broadcast', { event: 'usage' }, ({ payload }) => setUsage(payload as SessionUsage))
         // New agent reasoning / activity
         .on('postgres_changes', {
           event: 'INSERT', schema: 'public', table: 'terminal_events',
@@ -256,6 +263,7 @@ export function useChatFeed(sessionId: string) {
 
   return {
     feed,
+    usage,
     isLoading:       query.isLoading,
     isRefetching:    query.isRefetching && !query.isFetchingNextPage,
     // Older-history pagination

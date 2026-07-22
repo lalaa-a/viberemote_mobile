@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
-  View, Text, FlatList, StyleSheet, TouchableOpacity,
+  View, Text, StyleSheet, TouchableOpacity,
   TextInput, StatusBar, ActivityIndicator, KeyboardAvoidingView,
   Platform, Alert,
 } from 'react-native'
 import type { NativeSyntheticEvent, NativeScrollEvent } from 'react-native'
+import { FlashList, type FlashListRef } from '@shopify/flash-list'
 import Animated, { FadeInDown } from 'react-native-reanimated'
 import { useRoute, useNavigation, useFocusEffect } from '@react-navigation/native'
 import type { RouteProp } from '@react-navigation/native'
@@ -20,7 +21,7 @@ import { useMachineChannel } from '../../hooks/useMachineChannel'
 import { GradientBackground } from '../../components/GradientBackground'
 import { HarnessAvatar } from '../../components/HarnessAvatar'
 import { QuestionCard } from '../../components/QuestionCard'
-import { TerminalText } from '../../components/chat/TerminalText'
+import { MarkdownText } from '../../components/chat/MarkdownText'
 import { SPINNER_WORDS } from '../Terminal/spinnerWords'
 import { BackButton } from '../../components/ui/BackButton'
 import { Button } from '../../components/ui/Button'
@@ -44,14 +45,21 @@ const TOOL_ICONS: Record<string, string> = {
   Read: 'eye-outline', read: 'eye-outline',
 }
 
-// Reveal-once guards — an output row types out exactly once; if it recycles or
-// isn't the live edge, it renders in full instantly (see plan §13.3/13.4).
-const revealedOutputIds = new Set<string>()
-const seenActivityIds   = new Set<string>()
+// Reveal-once guard for activity rows — they fade in exactly once; if a row recycles or
+// isn't the live edge it renders instantly. (Output rows no longer animate: they render
+// Markdown, which can't be revealed progressively without parsing broken half-syntax.)
+const seenActivityIds = new Set<string>()
 
 function dirName(cwd: string | null) {
   if (!cwd) return '~'
   return cwd.split(/[\\/]/).filter(Boolean).pop() ?? cwd
+}
+
+// Compact token count: 842 · 12.3k · 1.1M
+function fmtTokens(n: number) {
+  if (!n || n < 1000) return String(n ?? 0)
+  if (n < 1_000_000) return (n / 1_000).toFixed(1).replace(/\.0$/, '') + 'k'
+  return (n / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M'
 }
 
 // Rotating status word ("Discombobulating…", "Pondering…") — mirrors what Claude Code
@@ -67,22 +75,23 @@ function useSpinnerWord(active: boolean) {
   return SPINNER_WORDS[idx]
 }
 
-// ── Agent reasoning — plain CLI output (no bubble), streamed ──────────────────
-function OutputBubble({ event, isLast }: { event: TerminalEvent; isLast: boolean }) {
+// ── Agent reasoning — rendered as Markdown ────────────────────────────────────
+// The agent writes Markdown (**bold**, `code`, fenced blocks, lists, headings), so this
+// renders it instead of dumping the raw syntax. Note there's no typewriter reveal here any
+// more: revealing Markdown character-by-character would parse broken half-syntax on every
+// tick (and re-parse the whole block each time), which looked wrong and was expensive.
+// Collapsing now clips by HEIGHT rather than slicing the string — slicing mid-Markdown
+// would cut a fence or a bold marker in half and corrupt the render.
+function OutputBubble({ event }: { event: TerminalEvent }) {
   const [expanded, setExpanded] = useState(true)
   const text = event.summary ?? ''
-  const isLong = text.length > 400
-  const display = expanded ? text : text.slice(0, 400) + '…'
-  const animate = isLast && !revealedOutputIds.has(event.id)
+  const isLong = text.length > 700
 
   return (
     <View style={styles.outputBlock}>
-      <TerminalText
-        text={display}
-        animate={animate}
-        onDone={() => revealedOutputIds.add(event.id)}
-        style={styles.outputText}
-      />
+      <View style={!expanded && styles.outputCollapsed}>
+        <MarkdownText text={text} />
+      </View>
       {isLong && (
         <TouchableOpacity onPress={() => setExpanded(v => !v)} activeOpacity={0.7} hitSlop={6}>
           <Text style={styles.showMore}>{expanded ? 'Show less ↑' : 'Show more ↓'}</Text>
@@ -273,7 +282,7 @@ const FeedRow = React.memo(function FeedRow({ item, isLast, onApprove, onDeny, o
   onOpen:    (id: string) => void
   onAnswer:  (id: string, answers: SelectedAnswer[]) => void
 }) {
-  if (item.kind === 'output')   return <OutputBubble   event={item.event} isLast={isLast} />
+  if (item.kind === 'output')   return <OutputBubble   event={item.event} />
   if (item.kind === 'activity') return <ActivityBubble event={item.event} isLast={isLast} />
   if (item.kind === 'sent')     return <SentBubble     cmd={item.cmd} />
   if (item.kind === 'notify')   return <NotifyRow      event={item.event} />
@@ -298,7 +307,7 @@ export function ChatScreen() {
   const insets     = useSafeAreaInsets()
   const { sessionId, machineLabel, cwd, machineIsOnline, harness, status, prefill } = route.params
 
-  const { feed, isLoading, isRefetching, fetchOlder, isFetchingOlder } = useChatFeed(sessionId)
+  const { feed, usage, isLoading, isRefetching, fetchOlder, isFetchingOlder } = useChatFeed(sessionId)
   const decide  = useDecideRequest()
   const answer  = useAnswerRequest()
   const sendPmt = useSendPrompt()
@@ -324,39 +333,27 @@ export function ChatScreen() {
   const pendingTimer   = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastIdRef      = useRef<string | undefined>(undefined)  // newest feed id, always current
   const pendingSinceId = useRef<string | undefined>(undefined)  // newest feed id when we armed
-  const listRef = useRef<FlatList>(null)
+  const listRef = useRef<FlashListRef<ChatItem>>(null)
 
-  const isNearBottomRef    = useRef(true)
-  const didInitialScroll   = useRef(false)
-  const followScheduled    = useRef(false)   // coalesces streaming size-changes into 1 scroll/frame
   const [showJumpToLatest, setShowJumpToLatest] = useState(false)
 
+  // ── FlashList (cell recycling) ─────────────────────────────────────────────────
+  // The list renders in natural order (oldest→newest). We do NOT manage the scroll
+  // position ourselves — FlashList's own maintainVisibleContentPosition does it (a JS
+  // implementation, on by default, built for chat). That's why we no longer need the
+  // `inverted` trick or any onContentSizeChange → scrollToEnd follow: RN's *native* MVCP
+  // drops its anchor when data updates faster than ~200ms (facebook/react-native#53542),
+  // which is exactly what streaming does — FlashList's does not.
+  // See FLASHLIST_MIGRATION.md.
   const handleScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent
     const distanceFromBottom = contentSize.height - (contentOffset.y + layoutMeasurement.height)
-    const near = distanceFromBottom < 120
-    isNearBottomRef.current = near
-    setShowJumpToLatest(!near)
+    setShowJumpToLatest(distanceFromBottom >= 120)
   }, [])
 
   const scrollToLatest = useCallback((animated = true) => {
-    requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated }))
-    isNearBottomRef.current = true
+    listRef.current?.scrollToEnd({ animated })
     setShowJumpToLatest(false)
-  }, [])
-
-  // Single source of auto-follow. Streaming reasoning grows the content height every frame
-  // (each firing onContentSizeChange), so coalesce to at most ONE instant pin per frame via
-  // rAF — otherwise the per-event scrollToEnd storm fights maintainVisibleContentPosition and
-  // the list bounces. Instant (animated:false) so it never competes with the "Jump to latest"
-  // animated scroll. See CHAT_LOADING_AND_NAVIGATION.md §4.
-  const followBottom = useCallback(() => {
-    if (followScheduled.current) return
-    followScheduled.current = true
-    requestAnimationFrame(() => {
-      followScheduled.current = false
-      listRef.current?.scrollToEnd({ animated: false })
-    })
   }, [])
 
   useFocusEffect(useCallback(() => {
@@ -395,7 +392,32 @@ export function ChatScreen() {
     }
     return null
   }, [feed])
-  const feedActive = feedTurn === 'ended' ? false : (feedTurn === 'active' || isActive)
+
+  // Force a periodic re-render while a turn looks active, so the `feedRecent` staleness check
+  // below re-evaluates even when the feed has stopped changing (e.g. the desktop disconnected
+  // and no new events arrive). Without this, a frozen feed never re-renders to flip it off.
+  const [, forceTick] = useState(0)
+  const feedActiveGuess = feedTurn === 'active' || isActive
+  useEffect(() => {
+    if (!feedActiveGuess) return
+    const id = setInterval(() => forceTick(t => t + 1), 10_000)
+    return () => clearInterval(id)
+  }, [feedActiveGuess])
+
+  // Reconcile the feed's live-edge with the server's own decay (see
+  // STALE_WORKING_ON_DISCONNECT_DESIGN.md §3-A). A dangling `feedTurn === 'active'` — a turn
+  // whose `stop` never arrived because the desktop was disconnected when it ended — must NOT
+  // override a server status that has since gone idle, nor a machine that's gone offline.
+  // `isActive` (kept fresh by the desktop keepalive) and `machine_is_online` are the real
+  // "desktop alive and working" truth; the feed's `'active'` is used only to LEAD `isActive`
+  // for a short window at turn start.
+  const lastTs     = lastItem ? Date.parse(lastItem.ts) : 0
+  const feedRecent = Date.now() - lastTs < 45_000   // covers the ~15s isActive lag + margin
+  const feedActive =
+    feedTurn === 'ended'  ? false :             // definitive end
+    liveOnline === false  ? false :             // machine offline → can't be working
+    isActive              ? true  :             // server says active (keepalive is fresh)
+    (feedTurn === 'active' && feedRecent)        // leading edge at turn start, before isActive flips
 
   // The user's own latest action wins immediately; the feed is the steady-state backstop.
   // 'stopped' forces the composer open even if a trailing reasoning `output` streams in
@@ -435,19 +457,32 @@ export function ChatScreen() {
     [answer],
   )
 
+  // The old FlatList used `gap` on the content container for row spacing. FlashList positions
+  // recycled cells itself, so `gap` no longer applies — each row carries its own bottom margin.
   const renderItem = useCallback(
     ({ item }: { item: ChatItem }) => (
-      <FeedRow
-        item={item}
-        isLast={item.id === lastId}
-        onApprove={handleApprove}
-        onDeny={handleDeny}
-        onOpen={handleOpen}
-        onAnswer={handleAnswer}
-      />
+      <View style={styles.rowSpacing}>
+        <FeedRow
+          item={item}
+          isLast={item.id === lastId}
+          onApprove={handleApprove}
+          onDeny={handleDeny}
+          onOpen={handleOpen}
+          onAnswer={handleAnswer}
+        />
+      </View>
     ),
     [handleApprove, handleDeny, handleOpen, handleAnswer, lastId],
   )
+
+  // Recycling hint: FlashList reuses a row's views for the next row of the SAME type. Our feed
+  // is heterogeneous and the types differ wildly in height (a one-line activity row vs a
+  // multi-paragraph output block vs a tall approval card), so keeping them in separate pools
+  // avoids re-layout churn. Approval and question cards get their own pools.
+  const getItemType = useCallback((item: ChatItem) => {
+    if (item.kind === 'request') return item.req.kind === 'question' ? 'question' : 'approval'
+    return item.kind   // 'output' | 'activity' | 'sent' | 'notify' | 'stop'
+  }, [])
 
   // Latch an optimistic composer state, auto-releasing after 30s so a dropped turn-end
   // signal can never wedge the bar permanently — the feed truth takes back over.
@@ -515,6 +550,13 @@ export function ChatScreen() {
 
   const dirLabel    = dirName(cwd)
   const workingWord = useSpinnerWord(turnActive)
+  // Live token usage wins; on remount (before the first broadcast) seed from the durable
+  // per-turn totals the sessions fetch carries, so the counter shows immediately.
+  const turnUsage = usage ?? (
+    (liveSession?.turn_tokens_input || liveSession?.turn_tokens_output)
+      ? { turnInput: liveSession.turn_tokens_input ?? 0, turnOutput: liveSession.turn_tokens_output ?? 0 }
+      : null
+  )
   const canType     = liveOnline && pendingCount === 0 && !cliClosed && !harnessOff && !turnActive
   const canSend  = prompt.trim().length > 0 && !sendPmt.isPending && canType
 
@@ -573,59 +615,52 @@ export function ChatScreen() {
             <ActivityIndicator size="large" color={DarkColors.online} />
             <Text style={styles.loadingText}>Loading conversation…</Text>
           </View>
+        ) : feed.length === 0 && !showThinking ? (
+          // Rendered as a sibling (not ListEmptyComponent): FlashList's contentContainerStyle
+          // can't do flex centring, so the empty state lives outside the list to stay centred.
+          <View style={styles.emptyWrap}>
+            <View style={styles.empty}>
+              <Ionicons name="chatbubbles-outline" size={40} color={DarkColors.textSecondary} />
+              <Text style={styles.emptyTitle}>No activity yet</Text>
+              <Text style={styles.emptySub}>
+                Reasoning and tool calls will appear here as the agent works.
+              </Text>
+            </View>
+          </View>
         ) : (
-          <FlatList
+          <FlashList
             ref={listRef}
             style={styles.flex}
             data={feed}
             keyExtractor={item => item.id}
             renderItem={renderItem}
-            contentContainerStyle={[
-              styles.listContent,
-              feed.length === 0 && styles.listContentEmpty,
-            ]}
+            getItemType={getItemType}
+            contentContainerStyle={styles.listContent}
             onScroll={handleScroll}
             scrollEventThrottle={16}
-            maintainVisibleContentPosition={{ minIndexForVisible: 1 }}
+            // Open an EXISTING conversation on the newest message. When the content is shorter
+            // than the viewport this is a no-op (there's nothing to scroll), so a new chat
+            // still fills from the top — which is why we use this instead of
+            // `startRenderingFromBottom`, which would bottom-anchor the few messages and leave
+            // dead space above them.
+            initialScrollIndex={feed.length > 0 ? feed.length - 1 : undefined}
+            // FlashList's OWN position keeping — replaces both the `inverted` trick and RN's
+            // unreliable native MVCP. Enabled by default; configured here for chat.
+            maintainVisibleContentPosition={{
+              startRenderingFromBottom:    false,  // messages start at the TOP and grow downward
+              autoscrollToBottomThreshold: 0.2,    // follow new messages only when near the bottom
+              animateAutoScrollToBottom:   false,  // instant pin — animating fights fast streaming
+            }}
+            // Natural order again, so older history is at the TOP.
             onStartReached={fetchOlder}
             onStartReachedThreshold={0.3}
             ListHeaderComponent={isFetchingOlder
               ? <View style={styles.loadingOlder}><ActivityIndicator size="small" color={DarkColors.textTertiary} /></View>
               : null
             }
-            onContentSizeChange={() => {
-              // Sole auto-follow trigger: pin to the newest content on the initial mount, and
-              // afterwards only while the user is near the bottom (scrolled up → leave them be
-              // and surface "Jump to latest" instead). followBottom coalesces per frame.
-              if (!didInitialScroll.current && feed.length > 0) {
-                didInitialScroll.current = true
-                followBottom()
-              } else if (isNearBottomRef.current) {
-                followBottom()
-              }
-            }}
-            windowSize={11}
-            maxToRenderPerBatch={8}
-            updateCellsBatchingPeriod={50}
-            initialNumToRender={15}
-            // removeClippedSubviews detaches off-screen rows on Android and is a well-known
-            // source of rows blanking/flickering — especially with variable heights and the
-            // live row growing as it types. Off = stable rendering; windowSize caps memory.
-            removeClippedSubviews={false}
             ListFooterComponent={showThinking
               ? <ThinkingBubble isPendingApproval={pendingCount > 0} />
               : null
-            }
-            ListEmptyComponent={
-              !showThinking ? (
-                <View style={styles.empty}>
-                  <Ionicons name="chatbubbles-outline" size={40} color={DarkColors.textSecondary} />
-                  <Text style={styles.emptyTitle}>No activity yet</Text>
-                  <Text style={styles.emptySub}>
-                    Reasoning and tool calls will appear here as the agent works.
-                  </Text>
-                </View>
-              ) : null
             }
           />
         )}
@@ -651,7 +686,7 @@ export function ChatScreen() {
                 <Text style={styles.closedTitle}>CLI is closed</Text>
                 <Text style={styles.closedSub}>
                   This session's terminal was closed. Start the agent again on your
-                  computer to continue — prompts can't be sent to a closed CLI.
+                  computer to continue prompts can't be sent to a closed CLI.
                 </Text>
               </View>
             </View>
@@ -673,11 +708,30 @@ export function ChatScreen() {
                 {pendingCount} approval{pendingCount > 1 ? 's' : ''} pending — scroll up to decide
               </Text>
             </View>
+          ) : !liveOnline ? (
+            // Machine offline (STALE_WORKING_ON_DISCONNECT_DESIGN.md §3-D): the phone genuinely
+            // doesn't know if the agent is still running, so show an honest state instead of a
+            // live spinner or a plain disabled input.
+            <View style={styles.offlineNote}>
+              <Ionicons name="cloud-offline-outline" size={16} color={DarkColors.textSecondary} />
+              <View style={styles.closedTextWrap}>
+                <Text style={[styles.closedTitle, { color: DarkColors.textSecondary }]}>Machine offline</Text>
+                <Text style={styles.closedSub}>
+                  Can't reach this machine. The agent may still be running locally — its status
+                  will update when the machine reconnects.
+                </Text>
+              </View>
+            </View>
           ) : turnActive ? (
             <View style={styles.workingRow}>
               <View style={styles.workingStatus}>
                 <ActivityIndicator size="small" color={DarkColors.online} />
-                <Text style={styles.workingStatusText}>{workingWord}…</Text>
+                <Text style={styles.workingStatusText} numberOfLines={1}>{workingWord}…</Text>
+                {turnUsage && turnUsage.turnOutput > 0 && (
+                  <Text style={styles.usageText} numberOfLines={1}>
+                    {fmtTokens(turnUsage.turnOutput)} tokens
+                  </Text>
+                )}
               </View>
               <TouchableOpacity
                 style={[styles.stopBtn, stopping && styles.stopBtnDisabled]}
@@ -698,7 +752,7 @@ export function ChatScreen() {
                 style={styles.input}
                 value={prompt}
                 onChangeText={setPrompt}
-                placeholder={!liveOnline ? 'Machine offline — cannot send' : 'Send a prompt…'}
+                placeholder={!liveOnline ? 'Machine offline cannot send the prompt' : 'Send a prompt…'}
                 placeholderTextColor={DarkColors.textTertiary}
                 multiline
                 editable={canType}
@@ -782,9 +836,11 @@ const styles = StyleSheet.create({
   // One shared gutter + one uniform vertical rhythm for every feed item.
   listContent: {
     paddingHorizontal: Spacing.px16, paddingTop: Spacing.px12,
-    paddingBottom: Spacing.px16, gap: Spacing.px12,
+    paddingBottom: Spacing.px16,
   },
-  listContentEmpty: { flexGrow: 1, justifyContent: 'center' },
+  // Replaces the old contentContainer `gap` — FlashList can't use gap for recycled cells.
+  rowSpacing: { marginBottom: Spacing.px12 },
+  emptyWrap: { flex: 1, justifyContent: 'center' },
 
   // ── Empty ──
   empty: { alignItems: 'center', paddingHorizontal: Spacing.px32, gap: Spacing.px12 },
@@ -796,7 +852,8 @@ const styles = StyleSheet.create({
 
   // ── Agent reasoning — plain full-width CLI output (aligned to gutter) ──
   outputBlock: { gap: 4 },
-  outputText: { color: DarkColors.textPrimary, lineHeight: 21 },
+  // Collapsed long output clips by height (never by slicing the Markdown string).
+  outputCollapsed: { maxHeight: 260, overflow: 'hidden' },
   showMore: { fontSize: FontSize.metadata, color: DarkColors.online, fontWeight: '500', marginTop: 2 },
 
   // ── Sent bubble (user prompt) ──
@@ -893,8 +950,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingVertical: Spacing.px8,
   },
-  workingStatus: { flexDirection: 'row', alignItems: 'center', gap: Spacing.px8 },
-  workingStatusText: { fontSize: FontSize.label, color: DarkColors.textSecondary, fontFamily: FontFamily.googleSans },
+  workingStatus: { flexDirection: 'row', alignItems: 'center', gap: Spacing.px8, flex: 1, marginRight: Spacing.px8 },
+  workingStatusText: { fontSize: FontSize.label, color: DarkColors.textSecondary, fontFamily: FontFamily.googleSans, flexShrink: 1 },
+  // Live token counter — metadata styling (muted, mono) so it reads as a stat, not a control.
+  usageText: { fontSize: FontSize.metadata, color: DarkColors.textTertiary, fontFamily: FontFamily.mono, flexShrink: 0 },
   stopBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     backgroundColor: DarkColors.danger,
@@ -912,6 +971,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.px8,
     paddingVertical: Spacing.px12, paddingHorizontal: Spacing.px8,
     backgroundColor: 'rgba(217,164,65,0.12)', borderRadius: Radius.md,
+  },
+  offlineNote: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.px8,
+    paddingVertical: Spacing.px12, paddingHorizontal: Spacing.px8,
+    backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: Radius.md,
   },
   closedTextWrap: { flex: 1, gap: 2 },
   closedTitle: { fontSize: FontSize.label, color: DarkColors.danger, fontWeight: '700', fontFamily: FontFamily.googleSans },

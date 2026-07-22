@@ -9,7 +9,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>AgentControl</string>
+	<string>Vibe Remote</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -60,6 +60,7 @@
 	<array>
 		<string>BitcountGridSingle-Regular.ttf</string>
 		<string>GoogleSansFlex-Regular.ttf</string>
+		<string>GoogleSansFlex-Bold.ttf</string>
 	</array>
 </dict>
 </plist>

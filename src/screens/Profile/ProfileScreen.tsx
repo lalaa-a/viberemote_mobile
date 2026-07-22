@@ -82,7 +82,7 @@ export function ProfileScreen() {
   function handleAbout() {
     Alert.alert(
       'Vibe Remote',
-      `Version ${APP_VERSION}\n\nControl and approve your AI coding agents from anywhere — review tool calls, answer questions, and send prompts on the go.`
+      `Version ${APP_VERSION}\n\nControl and approve your AI coding harnesses from anywhere review tool calls, answer questions, and send prompts on the go. Engineered by spiralware`
     )
   }
 
@@ -243,7 +243,8 @@ const styles = StyleSheet.create({
   },
 
   // Row
-  row: { flexDirection: 'row', alignItems: 'center', gap: Spacing.px12, paddingHorizontal: Spacing.px16, paddingVertical: Spacing.px10 },
+  // minHeight matches SecurityScreen's rows so both lists have identical row heights.
+  row: { flexDirection: 'row', alignItems: 'center', gap: Spacing.px12, paddingHorizontal: Spacing.px16, paddingVertical: Spacing.px10, minHeight: 58 },
   rowBorder: { borderBottomWidth: 1, borderBottomColor: DarkColors.border },
   rowIcon: { width: 30, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   rowLabel: { flex: 1, fontSize: FontSize.body, color: DarkColors.textPrimary, fontFamily: FontFamily.googleSans, fontWeight: '500' },

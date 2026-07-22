@@ -7,7 +7,8 @@ import com.facebook.react.defaults.DefaultReactActivityDelegate
 
 class MainActivity : ReactActivity() {
 
-    override fun getMainComponentName(): String = "AgentControl"
+    // MUST match `name` in app.json — that's the key index.js registers with AppRegistry.
+    override fun getMainComponentName(): String = "VibeRemote"
 
     override fun createReactActivityDelegate(): ReactActivityDelegate =
         DefaultReactActivityDelegate(this, mainComponentName, fabricEnabled)

@@ -8,4 +8,10 @@ export const SPINNER_WORDS = [
   'Noodling',
   'Pondering',
   'Ruminating',
+  'Spiraling',
+  'Thinking',
+  'Waffling',
+  'Wrestling',
+  'Creating',
+  'Flummoxing',
 ]

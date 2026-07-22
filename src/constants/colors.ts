@@ -106,6 +106,11 @@ export const FontFamily = {
   // internal PostScript name (Bitcount…-Regular, "Google Sans Flex").
   bitcount:    'BitcountGridSingle-Regular', // app name title only
   googleSans:  Platform.OS === 'ios' ? 'Google Sans Flex' : 'GoogleSansFlex-Regular',
+  // Real Bold face (static, instanced from the variable font by scripts/make-bold-font.py) —
+  // its own single-weight family so `fontFamily: googleSansBold` gives true bold on Android,
+  // where fontWeight can't reach a variable font's weight axis. File name == PostScript name,
+  // so one string works on both platforms.
+  googleSansBold: 'GoogleSansFlex-Bold',
 }
 
 export const FontSize = {
