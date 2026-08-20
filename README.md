@@ -69,104 +69,7 @@
 
 ---
 
-## 3. Directory Structure
-
-```
-AgentControl/
-├── index.js                         # Entry point
-├── App.tsx                          # Root component (providers, navigation)
-├── package.json                     # Dependencies
-├── tsconfig.json                    # TypeScript config
-├── babel.config.js                  # Babel config
-├── metro.config.js                  # Metro bundler config
-├── app.json                         # App metadata
-├── .env                             # Environment variables
-├── .env.example                     # Env template
-├── jest.config.js                   # Test config
-├── react-native.config.js           # RN config (icons)
-├── Gemfile                          # Ruby deps (iOS)
-│
-├── scripts/
-│   └── generate-app-icons.mjs       # App icon generation script
-│
-└── src/
-    ├── api/                          # API & data layer
-    │   ├── supabase.ts              # Supabase client init
-    │   ├── server.ts                # Express server API helpers
-    │   ├── realtime.ts              # Supabase Realtime subscriptions
-    │   ├── machines.ts              # Machine-related API calls
-    │   ├── device.ts                # Device registration
-    │   ├── biometric.ts             # Biometric auth helpers
-    │   └── appLock.ts               # App lock state management
-    │
-    ├── navigation/
-    │   └── RootNavigator.tsx        # Full navigation tree
-    │
-    ├── store/
-    │   └── useAppStore.ts           # Zustand global store
-    │
-    ├── types/
-    │   ├── index.ts                 # All TypeScript types
-    │   └── svg.d.ts                 # SVG module declarations
-    │
-    ├── constants/
-    │   └── colors.ts                # Theme color palette
-    │
-    ├── hooks/                       # Custom React hooks
-    │   ├── useAuth.ts               # Authentication state & actions
-    │   ├── useSessions.ts           # Session list queries
-    │   ├── useSessionsRealtime.ts   # Real-time session updates
-    │   ├── useRequests.ts           # Request queries & mutations
-    │   ├── useChatFeed.ts           # Chat feed with cursor pagination
-    │   ├── useTerminal.ts           # Terminal event queries
-    │   ├── useMachinesPresence.ts   # Machine online/offline tracking
-    │   ├── useFileTree.ts           # File tree browsing
-    │   ├── usePushNotifications.ts  # FCM token registration
-    │   └── useTypewriter.ts         # Typewriter animation effect
-    │
-    ├── screens/                     # Screen components
-    │   ├── SignInScreen.tsx          # Login
-    │   ├── SignUpScreen.tsx          # Registration
-    │   ├── QRScanScreen.tsx          # QR code scanner
-    │   ├── SessionsScreen.tsx        # Session list
-    │   ├── ChatScreen.tsx            # Live chat feed
-    │   ├── SessionDetailScreen.tsx   # Session details + feed
-    │   ├── FileBrowserScreen.tsx     # File tree viewer
-    │   ├── RequestDetailScreen.tsx   # Approval/question detail
-    │   ├── MachinesScreen.tsx        # Paired machines list
-    │   ├── ProfileScreen.tsx         # User profile
-    │   ├── SecurityScreen.tsx        # Biometric lock settings
-    │   ├── TerminalScreen.tsx        # Terminal event viewer
-    │   └── spinnerWords.ts           # Loading screen word list
-    │
-    └── components/                   # Reusable UI components
-        ├── ui/                       # Base design system
-        │   ├── Button.tsx            # Touchable button variants
-        │   ├── Badge.tsx             # Status badge
-        │   ├── Card.tsx              # Card container
-        │   └── BackButton.tsx        # Navigation back button
-        │
-        ├── GradientBackground.tsx    # Gradient backdrop
-        ├── HarnessAvatar.tsx         # Agent icon (Claude/OpenCode/Gemini)
-        ├── HarnessBadge.tsx          # Agent name badge
-        ├── RiskBadge.tsx             # Risk level indicator
-        ├── RequestCard.tsx           # Tool-use approval card
-        ├── QuestionCard.tsx          # Multi-choice question card
-        ├── PinEntry.tsx              # PIN input field
-        ├── LiveBadge.tsx             # "LIVE" indicator
-        ├── AppLockGate.tsx           # Biometric lock gate
-        │
-        ├── DiffViewer/
-        │   └── DiffViewer.tsx        # Code diff display (additions/deletions)
-        │
-        └── chat/
-            ├── MarkdownText.tsx       # Markdown renderer for chat
-            └── TerminalText.tsx       # Terminal-styled text display
-```
-
----
-
-## 4. Architecture
+## 3. Architecture
 
 ### High-Level Architecture
 
@@ -273,9 +176,9 @@ RootNavigator
 
 ---
 
-## 5. Key Components
+## 4. Key Components
 
-### 5.1 Screens
+### 4.1 Screens
 
 | Screen | Purpose | Key Features |
 |---|---|---|
@@ -292,7 +195,7 @@ RootNavigator
 | `ProfileScreen` | User profile | Display name, avatar, account settings |
 | `SecurityScreen` | App security | Biometric lock toggle, PIN setup |
 
-### 5.2 Custom Hooks
+### 4.2 Custom Hooks
 
 | Hook | Purpose | Queries/Mutations |
 |---|---|---|
@@ -307,7 +210,7 @@ RootNavigator
 | `usePushNotifications` | FCM token mgmt | Register token on auth |
 | `useTypewriter` | Animation effect | Loading screen text animation |
 
-### 5.3 UI Components
+### 4.3 UI Components
 
 | Component | Purpose |
 |---|---|
@@ -330,7 +233,7 @@ RootNavigator
 
 ---
 
-## 6. Data Flow
+## 5. Data Flow
 
 ### Authentication Flow
 
@@ -413,7 +316,7 @@ Feed items (UNION ALL from server):
 
 ---
 
-## 7. API Layer
+## 6. API Layer
 
 ### Supabase Client (`src/api/supabase.ts`)
 
@@ -464,7 +367,7 @@ REST calls to the Express server:
 
 ---
 
-## 8. State Management
+## 7. State Management
 
 ### Zustand Store (`src/store/useAppStore.ts`)
 
@@ -498,7 +401,7 @@ Decision mutations (approve/deny/answer) use optimistic updates:
 
 ---
 
-## 9. Real-Time Updates
+## 8. Real-Time Updates
 
 ### Broadcast Subscription Pattern
 
@@ -528,7 +431,7 @@ Server broadcasts 'feed' on session:<id>
 
 ---
 
-## 10. Configuration
+## 9. Configuration
 
 ### Environment Variables (`.env`)
 
@@ -551,7 +454,7 @@ Server broadcasts 'feed' on session:<id>
 
 ---
 
-## 11. Build & Deployment
+## 10. Build & Deployment
 
 ### NPM Scripts
 
@@ -588,7 +491,7 @@ Generated via `scripts/generate-app-icons.mjs` from source icon.
 
 ---
 
-## 12. Dependencies
+## 11. Dependencies
 
 ### Core
 
@@ -643,7 +546,7 @@ Generated via `scripts/generate-app-icons.mjs` from source icon.
 
 ---
 
-## 13. Design Patterns
+## 12. Design Patterns
 
 ### Optimistic UI Updates
 Decision mutations immediately update the React Query cache before the server responds. This gives instant visual feedback. On error, the cache is rolled back.
@@ -669,7 +572,7 @@ Base UI components (`Button`, `Badge`, `Card`) are platform-agnostic and composa
 
 ---
 
-## 14. Screens Reference
+## 13. Screens Reference
 
 ### Auth Screens
 
@@ -699,5 +602,3 @@ Base UI components (`Button`, `Badge`, `Card`) are platform-agnostic and composa
 | `SecurityScreen` | Push from Profile | Biometric lock toggle, PIN management |
 
 ---
-
-*Generated: 2026-08-20*
