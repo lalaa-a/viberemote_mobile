@@ -601,4 +601,8 @@ Base UI components (`Button`, `Badge`, `Card`) are platform-agnostic and composa
 | `ProfileScreen` | App Stack | User profile, display name, account settings |
 | `SecurityScreen` | Push from Profile | Biometric lock toggle, PIN management |
 
+## 📥 Download Latest APK
+
+[![Download APK](https://img.shields.io/badge/Download-APK-green?logo=android)](https://github.com/lalaa-a/viberemote_mobile/releases/download/v1.0.0/your-apk-filename.apk)
+
 ---
