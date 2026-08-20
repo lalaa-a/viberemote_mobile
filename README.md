@@ -1,4 +1,4 @@
-# Vibe Remote — React Native Mobile App
+# Vibe Remote - React Native Mobile App
 
 > React Native phone controller for AI coding agent remote supervision
 
